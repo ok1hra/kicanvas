@@ -19,6 +19,8 @@ export default {
     plugins: [
         esbuildPlugin({
             ts: true,
+            // Needed for experimentalDecorators, used by custom elements.
+            tsconfig: "./tsconfig.json",
             loaders: {
                 ".js": "ts",
                 ".glsl": "text",

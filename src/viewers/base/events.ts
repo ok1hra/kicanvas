@@ -44,12 +44,22 @@ export class KiCanvasMouseMoveEvent extends KiCanvasEvent<MouseMoveDetails> {
     }
 }
 
+/** Layer visibility, highlighting or zone fill display changed. */
+export class KiCanvasLayersChangedEvent extends KiCanvasEvent<null> {
+    static readonly type = "kicanvas:layers-changed";
+
+    constructor() {
+        super(KiCanvasLayersChangedEvent.type, null);
+    }
+}
+
 // Event maps for type safe addEventListener.
 
 export interface KiCanvasEventMap {
     [KiCanvasLoadEvent.type]: KiCanvasLoadEvent;
     [KiCanvasSelectEvent.type]: KiCanvasSelectEvent;
     [KiCanvasMouseMoveEvent.type]: KiCanvasMouseMoveEvent;
+    [KiCanvasLayersChangedEvent.type]: KiCanvasLayersChangedEvent;
 }
 
 declare global {

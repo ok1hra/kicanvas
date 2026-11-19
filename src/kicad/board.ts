@@ -140,15 +140,19 @@ export class KicadPCB {
         return this.project?.resolve_text_var(name);
     }
 
+    /**
+     * Bounding box of the board's own Edge.Cuts graphics (not including
+     * footprints), or an empty BBox if there are none.
+     */
     get edge_cuts_bbox(): BBox {
-        let bbox = new BBox(0, 0, 0, 0);
+        const boxes = [];
         for (const item of this.drawings) {
             if (item.layer != "Edge.Cuts" || !(item instanceof GraphicItem)) {
                 continue;
             }
-            bbox = BBox.combine([bbox, item.bbox]);
+            boxes.push(item.bbox);
         }
-        return bbox;
+        return BBox.combine(boxes);
     }
 
     find_footprint(uuid_or_ref: string): Footprint | null {

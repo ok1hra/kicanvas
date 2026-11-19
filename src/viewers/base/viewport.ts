@@ -40,6 +40,7 @@ export class Viewport {
 
         this.#observer = new SizeObserver(this.renderer.canvas, () => {
             this.#update_camera();
+            this.on_resize?.();
             this.callback();
         });
 
@@ -72,11 +73,22 @@ export class Viewport {
         }
     }
 
+    /** Called after the canvas changes size. */
+    on_resize?: () => void;
+
+    /**
+     * True once the user has panned or zoomed. Viewers use this to keep
+     * their automatic fit (e.g. the whole board) while the canvas is
+     * resized, until the user takes over.
+     */
+    user_moved_camera = false;
+
     enable_pan_and_zoom(min_zoom?: number, max_zoom?: number) {
         this.#pan_and_zoom = new PanAndZoom(
             this.renderer.canvas,
             this.camera,
             () => {
+                this.user_moved_camera = true;
                 this.callback();
             },
             min_zoom,

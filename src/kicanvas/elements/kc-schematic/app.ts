@@ -9,6 +9,7 @@ import { KCViewerAppElement } from "../common/app";
 import { KCSchematicViewerElement } from "./viewer";
 
 // Import dependent elements so they're registered before use.
+import "./hierarchy-panel";
 import "./info-panel";
 import "./properties-panel";
 import "./symbols-panel";
@@ -44,6 +45,30 @@ export class KCSchematicAppElement extends KCViewerAppElement<KCSchematicViewerE
 
     override can_load(src: ProjectPage): boolean {
         return src.document instanceof KicadSch;
+    }
+
+    protected override initial_page() {
+        const active = this.project.active_page;
+        if (active && this.can_load(active)) {
+            return active;
+        }
+        return this.project.root_schematic_page;
+    }
+
+    protected override get menu_heading() {
+        return "Schematic";
+    }
+
+    protected override make_sections() {
+        return [
+            this.section(
+                "hierarchy",
+                "Hierarchy",
+                html`<kc-schematic-hierarchy-panel></kc-schematic-hierarchy-panel>`,
+                true,
+            ),
+            ...super.make_sections(),
+        ];
     }
 
     override make_viewer_element(): KCSchematicViewerElement {

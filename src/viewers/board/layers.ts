@@ -143,6 +143,7 @@ export enum CopperVirtualLayerNames {
     bb_via_holes = "BBViaHoles",
     bb_via_hole_walls = "BBViaHoleWalls",
     zones = "Zones",
+    zone_outlines = "ZoneOutlines",
 }
 
 export function virtual_layer_for(
@@ -222,6 +223,12 @@ export function* copper_layers_between(
  * Board view layer set
  */
 export class LayerSet extends BaseLayerSet {
+    /**
+     * Whether filled zones are drawn. When false, only zone outlines are
+     * drawn.
+     */
+    show_zone_fills = true;
+
     /**
      * Create a new LayerSet
      */
@@ -313,7 +320,25 @@ export class LayerSet extends BaseLayerSet {
                             layer_name,
                             CopperVirtualLayerNames.zones,
                         ),
-                        () => this.by_name(layer_name)!.visible,
+                        () =>
+                            this.by_name(layer_name)!.visible &&
+                            this.show_zone_fills,
+                        false,
+                        this.color_for(layer_name),
+                    ),
+                );
+                // Like KiCad's "show zone outlines only" mode, used when
+                // zone fills are hidden.
+                this.add(
+                    new ViewLayer(
+                        this,
+                        virtual_layer_for(
+                            layer_name,
+                            CopperVirtualLayerNames.zone_outlines,
+                        ),
+                        () =>
+                            this.by_name(layer_name)!.visible &&
+                            !this.show_zone_fills,
                         false,
                         this.color_for(layer_name),
                     ),

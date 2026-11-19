@@ -349,16 +349,24 @@ class ZonePainter extends BoardItemPainter {
             layers.push("F.Cu", "B.Cu");
         }
 
-        return layers.map((l) => {
+        return layers.flatMap((l) => {
             if (CopperLayerNames.includes(l as LayerNames)) {
-                return virtual_layer_for(l, CopperVirtualLayerNames.zones);
+                return [
+                    virtual_layer_for(l, CopperVirtualLayerNames.zones),
+                    virtual_layer_for(l, CopperVirtualLayerNames.zone_outlines),
+                ];
             } else {
-                return l;
+                return [l];
             }
         });
     }
 
     paint(layer: ViewLayer, z: board_items.Zone) {
+        if (layer.name.endsWith(CopperVirtualLayerNames.zone_outlines)) {
+            this.#paint_outline(layer, z);
+            return;
+        }
+
         if (!z.filled_polygons) {
             return;
         }
@@ -376,6 +384,25 @@ class ZonePainter extends BoardItemPainter {
             }
 
             this.gfx.polygon(new Polygon(p.polyline, layer.color));
+        }
+    }
+
+    #paint_outline(layer: ViewLayer, z: board_items.Zone) {
+        // Rule areas don't have fills to stand in for.
+        if (z.keepout || !z.polygons) {
+            return;
+        }
+
+        if (this.filter_net && z.net != this.filter_net) {
+            return;
+        }
+
+        for (const p of z.polygons) {
+            const pts = p.polyline;
+            if (pts.length < 2) {
+                continue;
+            }
+            this.gfx.line(new Polyline([...pts, pts[0]!], 0.1, layer.color));
         }
     }
 }

@@ -17,6 +17,7 @@ import {
     KCUIActivitySideBarElement,
     KCUIButtonElement,
     KCUIElement,
+    KCUIFloatingPanelElement,
 } from "../../../kc-ui";
 import { KiCanvasSelectEvent } from "../../../viewers/base/events";
 import type { Viewer } from "../../../viewers/base/viewer";
@@ -43,6 +44,8 @@ export abstract class KCViewerAppElement<
 > extends KCUIElement {
     #viewer_elm: ViewerElementT;
     #activity_bar: KCUIActivitySideBarElement | null;
+    #floating_panel: KCUIFloatingPanelElement | null = null;
+    #current_page?: ProjectPage;
 
     project: Project;
     viewerReady: DeferredPromise<boolean> = new DeferredPromise<boolean>();
@@ -56,8 +59,17 @@ export abstract class KCViewerAppElement<
         return this.#viewer_elm.viewer;
     }
 
+    /**
+     * - none: not interactive
+     * - basic: pan, zoom & select
+     * - full: activity side bar with panels
+     * - floating: panels are sections of a small draggable floating menu,
+     *   and the app keeps showing its own page when the project's active
+     *   page is one it can't show (so that a schematic and a board app can
+     *   be shown side by side).
+     */
     @attribute({ type: String })
-    controls: "none" | "basic" | "full";
+    controls: "none" | "basic" | "full" | "floating";
 
     @attribute({ type: String })
     controlslist: string;
@@ -74,10 +86,30 @@ export abstract class KCViewerAppElement<
         })();
     }
 
+    /** The page currently shown by this app. */
+    get current_page() {
+        return this.#current_page;
+    }
+
+    get floating() {
+        return this.controls == "floating";
+    }
+
+    /**
+     * The page to show initially in floating mode, when the project's
+     * active page might be for the other app.
+     */
+    protected initial_page(): ProjectPage | undefined {
+        return this.project.active_page ?? undefined;
+    }
+
     override initialContentCallback() {
         // If the project already has an active page, load it.
-        if (this.project.active_page) {
-            this.load(this.project.active_page!);
+        const initial = this.floating
+            ? this.initial_page()
+            : this.project.active_page;
+        if (initial) {
+            this.load(initial);
         }
 
         // Listen for changes to the project's active page and load or hide
@@ -86,6 +118,10 @@ export abstract class KCViewerAppElement<
             listen(this.project, "change", async (e) => {
                 const page = this.project.active_page;
                 if (page) {
+                    if (this.floating && !this.can_load(page)) {
+                        // The other app will show it.
+                        return;
+                    }
                     await this.load(page);
                 } else {
                     this.hidden = true;
@@ -104,13 +140,13 @@ export abstract class KCViewerAppElement<
         delegate(this.renderRoot, "kc-ui-button", "click", (e) => {
             const target = e.target as KCUIButtonElement;
             switch (target.name) {
-                case "download":
-                    if (this.project.active_page) {
-                        this.project.download(
-                            this.project.active_page.filename,
-                        );
+                case "download": {
+                    const page = this.#current_page ?? this.project.active_page;
+                    if (page) {
+                        this.project.download(page.filename);
                     }
                     break;
+                }
                 case "flip_view":
                     this.#viewer_elm.viewer.flip_view();
                     break;
@@ -130,12 +166,23 @@ export abstract class KCViewerAppElement<
     async load(src: ProjectPage) {
         await this.viewerReady;
         if (this.can_load(src)) {
-            await this.#viewer_elm.load(src);
+            this.#current_page = src;
             this.hidden = false;
-        } else {
+            await this.#viewer_elm.load(src);
+            this.dispatchEvent(
+                new CustomEvent(KCViewerAppElement.page_loaded_event, {
+                    detail: src,
+                    bubbles: true,
+                    composed: true,
+                }),
+            );
+        } else if (!this.floating) {
             this.hidden = true;
         }
     }
+
+    /** Fired after the app shows a new page. */
+    static page_loaded_event = "kicanvas:app:page-loaded";
 
     #has_more_than_one_page() {
         return length(this.project.pages()) > 1;
@@ -182,7 +229,58 @@ export abstract class KCViewerAppElement<
 
     protected abstract make_activities(): ElementOrFragment[];
 
+    /**
+     * Sections of the floating menu used when controls="floating". By
+     * default each activity becomes a (closed) section.
+     */
+    protected make_sections(): ElementOrFragment[] {
+        return [...this.make_activities(), ...this.make_post_activities()].map(
+            (activity) => this.activity_to_section(activity),
+        );
+    }
+
+    /** Heading of the floating menu. */
+    protected get menu_heading(): string {
+        return "";
+    }
+
+    /** Which side of the viewer the floating menu starts on. */
+    protected get menu_anchor(): "left" | "right" {
+        return "left";
+    }
+
+    /** Creates a floating menu section. */
+    protected section(
+        name: string,
+        heading: string,
+        content: ElementOrFragment,
+        open = false,
+    ) {
+        return html`<kc-ui-floating-section
+            name="${name}"
+            heading="${heading}"
+            open="${open}">
+            ${content}
+        </kc-ui-floating-section>`;
+    }
+
+    /** Moves the content of a kc-ui-activity into a floating section. */
+    protected activity_to_section(activity: ElementOrFragment) {
+        const elm =
+            activity instanceof DocumentFragment
+                ? activity.firstElementChild!
+                : activity;
+        const name = elm.getAttribute("name") ?? "";
+        const content = document.createDocumentFragment();
+        content.append(...elm.childNodes);
+        return this.section(name.toLowerCase(), name, content);
+    }
+
     protected change_activity(name?: string) {
+        if (this.#floating_panel && name) {
+            this.#floating_panel.open_section(name.toLowerCase());
+            return;
+        }
         this.#activity_bar?.change_activity(name);
     }
 
@@ -202,7 +300,17 @@ export abstract class KCViewerAppElement<
 
         let resizer = null;
 
-        if (controls == "full") {
+        this.#floating_panel = null;
+
+        if (controls == "floating") {
+            this.#activity_bar = null;
+            this.#floating_panel = html`<kc-ui-floating-panel
+                heading="${this.menu_heading}"
+                anchor="${this.menu_anchor}"
+                storage-key="${this.localName}">
+                ${this.make_sections()}
+            </kc-ui-floating-panel>` as KCUIFloatingPanelElement;
+        } else if (controls == "full") {
             const pre_activities = this.make_pre_activities();
             const post_activities = this.make_post_activities();
             const activities = this.make_activities();
@@ -217,11 +325,16 @@ export abstract class KCViewerAppElement<
         }
 
         const top_toolbar_buttons = [];
+        // Keep the toolbar buttons clear of the floating menu.
+        const toolbar_slot =
+            controls == "floating" && this.menu_anchor == "right"
+                ? "left"
+                : "right";
 
         if (controlslist["download"] && !this.#has_more_than_one_page()) {
             top_toolbar_buttons.push(
                 html`<kc-ui-button
-                    slot="right"
+                    slot="${toolbar_slot}"
                     name="download"
                     title="download"
                     icon="download"
@@ -236,7 +349,7 @@ export abstract class KCViewerAppElement<
         ) {
             top_toolbar_buttons.push(
                 html`<kc-ui-button
-                    slot="right"
+                    slot="${toolbar_slot}"
                     name="flip_view"
                     title="flip view"
                     icon="flip"
@@ -257,6 +370,7 @@ export abstract class KCViewerAppElement<
         return html`<kc-ui-split-view vertical>
             <kc-ui-view class="grow">
                 ${top_toolbar} ${this.#viewer_elm} ${bottom_toolbar}
+                ${this.#floating_panel}
             </kc-ui-view>
             ${resizer} ${this.#activity_bar}
         </kc-ui-split-view>`;
