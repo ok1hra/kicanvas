@@ -21,6 +21,7 @@
 
 /* Schematic on the left, board on the right, with a draggable divider. */
 :host main {
+    position: relative;
     display: flex;
     flex-direction: row;
     flex: 1 1 auto;
