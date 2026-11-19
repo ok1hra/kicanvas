@@ -11,17 +11,19 @@ export function no_self_recursion(
 ) {
     const fn = descriptor.value;
 
-    let _is_running = false;
+    // Tracked per instance: calling the same method on a different object
+    // (e.g. one viewer's selection changing another's) isn't recursion.
+    const running = new WeakSet<object>();
 
-    descriptor.value = function (...args: any[]) {
-        if (_is_running) {
+    descriptor.value = function (this: object, ...args: any[]) {
+        if (running.has(this)) {
             return;
         }
-        _is_running = true;
+        running.add(this);
         try {
-            fn.apply(this, args);
+            return fn.apply(this, args);
         } finally {
-            _is_running = false;
+            running.delete(this);
         }
     };
 }
