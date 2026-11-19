@@ -12,6 +12,7 @@ import type { BoardTheme } from "../../kicad";
 import * as kicad_common from "../../kicad/common";
 import * as board_items from "../../kicad/board";
 import { DocumentViewer } from "../base/document-viewer";
+import { KiCanvasLayersChangedEvent } from "../base/events";
 import { LayerNames, LayerSet, ViewLayer } from "./layers";
 import { BoardPainter } from "./painter";
 
@@ -152,13 +153,44 @@ export class BoardViewer extends DocumentViewer<
         this.draw();
     }
 
+    /** Tells UI elements that layer visibility or zone fill changed. */
+    notify_layers_changed() {
+        this.dispatchEvent(new KiCanvasLayersChangedEvent());
+    }
+
+    /** Shows only the copper layers and the board outline. */
+    show_copper_layers_only() {
+        for (const layer of (this.layers as LayerSet).in_ui_order()) {
+            layer.visible =
+                layer.name.endsWith(".Cu") ||
+                layer.name == LayerNames.edge_cuts;
+        }
+        this.draw();
+        this.notify_layers_changed();
+    }
+
+    /** Whether zones are drawn filled (true) or as outlines only (false). */
+    get zone_fills(): boolean {
+        return (this.layers as LayerSet).show_zone_fills;
+    }
+
+    set zone_fills(value: boolean) {
+        (this.layers as LayerSet).show_zone_fills = value;
+        this.draw();
+        this.notify_layers_changed();
+    }
+
     /**
      * Zooms to fit the board outline (Edge.Cuts). Falls back to the page if
      * the board has no outline.
      */
     zoom_to_board() {
-        const edge_cuts = this.layers.by_name(LayerNames.edge_cuts);
-        const board_bbox = edge_cuts?.bbox;
+        // Prefer the board's own outline: footprints placed off the board
+        // can have Edge.Cuts graphics too (e.g. connector cutouts).
+        let board_bbox = this.board.edge_cuts_bbox;
+        if (!board_bbox.valid) {
+            board_bbox = this.layers.by_name(LayerNames.edge_cuts)!.bbox;
+        }
 
         if (!board_bbox?.valid) {
             this.zoom_to_page();

@@ -17,6 +17,7 @@ import {
 } from "../../kicad/schematic";
 import type { ProjectPage } from "../../kicanvas/project";
 import { DocumentViewer } from "../base/document-viewer";
+import { ViewLayerNames } from "../base/view-layers";
 import { LayerSet } from "./layers";
 import { SchematicPainter } from "./painter";
 
@@ -49,6 +50,41 @@ export class SchematicViewer extends DocumentViewer<
         doc.update_hierarchical_data(src.sheet_path);
 
         return await super.load(doc);
+    }
+
+    /**
+     * Zooms so that everything drawn on the sheet (but not the drawing sheet
+     * border and title block) fills the view.
+     */
+    zoom_to_content() {
+        const skip = [
+            ViewLayerNames.drawing_sheet,
+            ViewLayerNames.grid,
+            ViewLayerNames.overlay,
+        ] as string[];
+        const boxes = [];
+        for (const layer of this.layers.in_order()) {
+            if (skip.includes(layer.name)) {
+                continue;
+            }
+            const bbox = layer.bbox;
+            if (bbox.valid) {
+                boxes.push(bbox);
+            }
+        }
+
+        if (!boxes.length) {
+            this.zoom_to_page();
+            return;
+        }
+
+        const bbox = BBox.combine(boxes);
+        this.viewport.camera.bbox = bbox.grow(Math.max(bbox.w, bbox.h) * 0.02);
+        this.draw();
+    }
+
+    protected override zoom_to_initial_view() {
+        this.zoom_to_content();
     }
 
     protected override create_painter() {

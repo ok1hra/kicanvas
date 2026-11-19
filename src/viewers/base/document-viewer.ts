@@ -70,9 +70,17 @@ export abstract class DocumentViewer<
             await this.viewport.ready;
             this.viewport.bounds = this.drawing_sheet.page_bbox.grow(50);
 
-            // Position the camera and draw the scene.
+            // Position the camera and draw the scene. Until the user moves
+            // the camera, keep the initial view fitted when the canvas is
+            // resized (e.g. when a split view pane changes size).
             log.info("Positioning camera");
             this.zoom_to_initial_view();
+            this.viewport.user_moved_camera = false;
+            this.viewport.on_resize = () => {
+                if (!this.viewport.user_moved_camera && this.document) {
+                    this.zoom_to_initial_view();
+                }
+            };
 
             // Mark the viewer as loaded and notify event listeners
             this.resolve_loaded(true);

@@ -281,8 +281,8 @@ export class Project extends EventTarget implements IDisposable {
             filter(this.#pages_by_path.values(), (p) => p.type == "schematic"),
         );
 
-        if (!this.#root_schematic_page) {
-            log.error("No vaild root schematic was found.");
+        if (!this.#root_schematic_page && this.has_schematics) {
+            log.error("No valid root schematic was found.");
         }
     }
 
