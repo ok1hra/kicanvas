@@ -5,7 +5,7 @@
 */
 
 import { Color } from "../base/color";
-import { Angle, Matrix3, Vec2 } from "../base/math";
+import { Angle, BBox, Matrix3, Vec2 } from "../base/math";
 import { Renderer, RenderLayer, RenderStateStack } from "./renderer";
 import { Arc, Circle, Polygon, Polyline } from "./shapes";
 
@@ -177,6 +177,14 @@ export class Canvas2DRenderer extends Renderer {
         );
     }
 
+    override image(image: HTMLImageElement, bbox: BBox): void {
+        const p0 = this.state.matrix.transform(bbox.start);
+        const p1 = this.state.matrix.transform(bbox.end);
+        const box = BBox.from_points([p0, p1]);
+        this.add_bbox(box);
+        this.#active_layer!.commands.push(new ImageCommand(image, box));
+    }
+
     override polygon(polygon_or_points: Polygon | Vec2[], color?: Color): void {
         const polygon = super.prep_polygon(polygon_or_points, color);
 
@@ -247,11 +255,26 @@ class DrawCommand {
     }
 }
 
+class ImageCommand {
+    constructor(
+        public image: HTMLImageElement,
+        public bbox: BBox,
+    ) {}
+
+    render(ctx: CanvasRenderingContext2D) {
+        // Images are decoded asynchronously; they're drawn once loaded.
+        if (this.image.complete && this.image.naturalWidth) {
+            const { x, y, w, h } = this.bbox;
+            ctx.drawImage(this.image, x, y, w, h);
+        }
+    }
+}
+
 class Canvas2dRenderLayer extends RenderLayer {
     constructor(
         public override readonly renderer: Renderer,
         public override readonly name: string,
-        public commands: DrawCommand[] = [],
+        public commands: (DrawCommand | ImageCommand)[] = [],
     ) {
         super(renderer, name);
     }
@@ -273,7 +296,7 @@ class Canvas2dRenderLayer extends RenderLayer {
         const last_command = this.commands.at(-1);
 
         if (
-            last_command &&
+            last_command instanceof DrawCommand &&
             (last_command.path_count < 20,
             last_command.fill == fill &&
                 last_command.stroke == stroke &&

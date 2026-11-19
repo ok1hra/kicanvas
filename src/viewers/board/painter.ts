@@ -150,6 +150,19 @@ class RectPainter extends GraphicItemPainter {
     }
 }
 
+class CurvePainter extends GraphicItemPainter {
+    classes = [board_items.GrCurve, board_items.FpCurve];
+
+    layers_for(item: board_items.GrCurve | board_items.FpCurve) {
+        return [item.layer];
+    }
+
+    paint(layer: ViewLayer, c: board_items.GrCurve | board_items.FpCurve) {
+        if (this.filter_net) return;
+        this.styled_line(c.polyline, c.width, layer.color, c.stroke_params);
+    }
+}
+
 class PolyPainter extends GraphicItemPainter {
     classes = [board_items.Poly, board_items.GrPoly, board_items.FpPoly];
 
@@ -1241,6 +1254,7 @@ export class BoardPainter extends DocumentPainter {
             new LinePainter(this, gfx),
             new RectPainter(this, gfx),
             new PolyPainter(this, gfx),
+            new CurvePainter(this, gfx),
             new ArcPainter(this, gfx),
             new CirclePainter(this, gfx),
             new TraceSegmentPainter(this, gfx),

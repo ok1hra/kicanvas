@@ -58,7 +58,7 @@ export const DefaultValues = {
     pin_name_offset: 0.508, // 20 mils
 };
 
-export type SchematicDrawing = Polyline | Text | Circle | Image;
+export type SchematicDrawing = Polyline | Text | Circle | Bezier | Image;
 
 export class KicadSch {
     project?: Project;
@@ -134,6 +134,7 @@ export class KicadSch {
                 P.collection("drawings", "arc", T.item(Arc, this)),
                 P.collection("drawings", "text", T.item(Text, this)),
                 P.collection("drawings", "circle", T.item(Circle, this)),
+                P.collection("drawings", "bezier", T.item(Bezier)),
                 P.collection("rule_areas", "rule_area", T.item(RuleArea, this)),
                 P.collection("tables", "table", T.item(Table, this)),
                 P.collection(
@@ -698,6 +699,7 @@ export class Image {
     uuid?: string;
     at: At;
     scale = 1;
+    /** Base64 encoded image file (PNG, BMP, JPEG) */
     data: string;
 
     constructor(expr: Parseable) {
@@ -708,10 +710,90 @@ export class Image {
                 P.start("image"),
                 P.item("at", At),
                 P.pair("scale", T.number),
-                P.pair("data", T.string),
+                // The data is split into several strings.
+                P.expr("data", (obj, name, e) =>
+                    (e as unknown[])
+                        .slice(1)
+                        .filter((s) => typeof s == "string")
+                        .join(""),
+                ),
                 P.pair("uuid", T.string),
             ),
         );
+        this.data ??= "";
+    }
+
+    get mime_type() {
+        if (this.data.startsWith("iVBOR")) return "image/png";
+        if (this.data.startsWith("Qk")) return "image/bmp";
+        if (this.data.startsWith("/9j/")) return "image/jpeg";
+        return "image/png";
+    }
+
+    get data_url() {
+        return `data:${this.mime_type};base64,${this.data}`;
+    }
+
+    #header?: { width: number; height: number; ppi: number };
+
+    /**
+     * Size in pixels and resolution, read from the image's header. The
+     * resolution follows KiCad (via wxWidgets): pixels per meter are
+     * truncated to pixels per centimeter, and 300 PPI is used if the image
+     * doesn't say.
+     */
+    get header() {
+        if (!this.#header) {
+            this.#header = { width: 0, height: 0, ppi: 300 };
+            let bytes: Uint8Array;
+            try {
+                const raw = atob(this.data.slice(0, 4096));
+                bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+            } catch {
+                return this.#header;
+            }
+            const view = new DataView(bytes.buffer);
+            const from_ppm = (ppm: number) => {
+                const ppcm = Math.trunc(ppm / 100);
+                return ppcm > 0 ? Math.round(ppcm * 2.54) : 300;
+            };
+
+            if (this.mime_type == "image/png" && bytes.length >= 24) {
+                this.#header.width = view.getUint32(16);
+                this.#header.height = view.getUint32(20);
+                // Look for the pHYs chunk.
+                let i = 8;
+                while (i + 8 <= bytes.length) {
+                    const length = view.getUint32(i);
+                    const type = String.fromCharCode(
+                        ...bytes.subarray(i + 4, i + 8),
+                    );
+                    if (type == "pHYs" && i + 17 <= bytes.length) {
+                        if (bytes[i + 16] == 1) {
+                            this.#header.ppi = from_ppm(view.getUint32(i + 8));
+                        }
+                        break;
+                    }
+                    if (type == "IDAT" || type == "IEND") break;
+                    i += 12 + length;
+                }
+            } else if (this.mime_type == "image/bmp" && bytes.length >= 42) {
+                this.#header.width = Math.abs(view.getInt32(18, true));
+                this.#header.height = Math.abs(view.getInt32(22, true));
+                this.#header.ppi = from_ppm(view.getInt32(38, true));
+            }
+        }
+        return this.#header;
+    }
+
+    /** Size on the sheet, in mm, or undefined if it can't be determined */
+    get size(): Vec2 | undefined {
+        const { width, height, ppi } = this.header;
+        if (!width || !height) {
+            return undefined;
+        }
+        const k = (25.4 / ppi) * (this.scale ?? 1);
+        return new Vec2(width * k, height * k);
     }
 }
 
@@ -1110,6 +1192,8 @@ export class LibSymbol {
                     P.pair("offset", T.number),
                     P.atom("hide"),
                 ),
+                // KiCad 10 names of the body styles, e.g. De Morgan.
+                P.expr("body_styles"),
                 P.pair("in_bom", T.boolean),
                 P.pair("on_board", T.boolean),
                 P.pair("in_pos_files", T.boolean),
