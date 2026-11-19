@@ -1,7 +1,7 @@
 site_name: KiCanvas Documentation
-site_url: https://docs.kicanvas.org
+site_url: https://ok1hra.github.io/kicanvas/
 copyright: "© 2023 Alethea Katherine Flowers, Licensed under Creative Commons CC BY-SA 4.0"
-repo_url: "https://github.com/theacodes/kicanvas"
+repo_url: "https://github.com/ok1hra/kicanvas"
 edit_uri: edit/main/docs/docs
 theme:
     name: material
