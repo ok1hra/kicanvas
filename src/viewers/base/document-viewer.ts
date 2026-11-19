@@ -82,13 +82,15 @@ export abstract class DocumentViewer<
                 }
             };
 
+            // Deselect anything from the previous document. This is done
+            // quietly and before notifying listeners, so that listeners can
+            // select something in the new document (e.g. cross-probing).
+            if (this.selected) {
+                this.set_selected_quietly(null);
+            }
+
             // Mark the viewer as loaded and notify event listeners
             this.resolve_loaded(true);
-
-            // Deselect any selected items.
-            if (this.selected) {
-                this.selected = null;
-            }
 
             // Draw
             this.draw();

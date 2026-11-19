@@ -34,7 +34,7 @@ export class KCBoardNetsPanelElement extends KCUIElement {
                 return;
             }
 
-            this.viewer.highlight_net(number);
+            this.viewer.highlight_net(number, true);
         });
 
         // Wire up search to filter the list

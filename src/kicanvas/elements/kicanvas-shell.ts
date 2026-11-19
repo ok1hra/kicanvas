@@ -10,6 +10,9 @@ import { FilePicker } from "../../base/dom/file-picker";
 import { CSS, attribute, html, query } from "../../base/web-components";
 import { KCUIElement, KCUIIconElement } from "../../kc-ui";
 import { sprites_url } from "../icons/sprites";
+import type { BoardViewer } from "../../viewers/board/viewer";
+import type { SchematicViewer } from "../../viewers/schematic/viewer";
+import { CrossProbe } from "../cross-probe";
 import { Project } from "../project";
 import { GitHubFileSystem } from "../services/github-vfs";
 import { CodebergFileSystem } from "../services/codeberg-vfs";
@@ -59,6 +62,7 @@ class KiCanvasShellElement extends KCUIElement {
 
     #schematic_app: KCSchematicAppElement;
     #board_app: KCBoardAppElement;
+    #cross_probe?: CrossProbe;
 
     constructor() {
         super();
@@ -163,11 +167,34 @@ class KiCanvasShellElement extends KCUIElement {
             this.has_board = this.project.has_boards;
             this.project.set_active_page(this.project.first_page);
             this.loaded = true;
+            this.#setup_cross_probe();
         } catch (e) {
             console.error(e);
         } finally {
             this.loading = false;
         }
+    }
+
+    /** Keeps the schematic and board views in sync, see CrossProbe. */
+    async #setup_cross_probe() {
+        this.#cross_probe?.dispose();
+        this.#cross_probe = undefined;
+
+        if (!this.project.has_schematics || !this.project.has_boards) {
+            return;
+        }
+
+        await Promise.all([
+            this.#schematic_app.viewerReady,
+            this.#board_app.viewerReady,
+        ]);
+
+        this.#cross_probe = new CrossProbe(
+            this.project,
+            this.#schematic_app.viewer as SchematicViewer,
+            this.#board_app.viewer as BoardViewer,
+            () => this.#schematic_app.current_page,
+        );
     }
 
     override render() {

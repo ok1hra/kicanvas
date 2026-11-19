@@ -12,7 +12,10 @@ import type { BoardTheme } from "../../kicad";
 import * as kicad_common from "../../kicad/common";
 import * as board_items from "../../kicad/board";
 import { DocumentViewer } from "../base/document-viewer";
-import { KiCanvasLayersChangedEvent } from "../base/events";
+import {
+    KiCanvasLayersChangedEvent,
+    KiCanvasNetSelectEvent,
+} from "../base/events";
 import { LayerNames, LayerSet, ViewLayer } from "./layers";
 import { BoardPainter } from "./painter";
 
@@ -88,11 +91,19 @@ export class BoardViewer extends DocumentViewer<
         if (item instanceof board_items.Footprint) {
             this.select(item);
         } else if (kicad_common.isNetInfo(item)) {
-            this.highlight_net(kicad_common.getNetNumber(item));
+            this.highlight_net(kicad_common.getNetNumber(item), true);
         }
     }
 
+    #highlighted_net: number | null = null;
+
+    /** The number of the highlighted net, if any. */
+    get highlighted_net() {
+        return this.#highlighted_net;
+    }
+
     override select(item: board_items.Footprint | string | BBox | null) {
+        this.#highlighted_net = null;
         // If item is a string, find the footprint by uuid or reference.
         if (is_string(item)) {
             item = this.board.find_footprint(item);
@@ -106,9 +117,79 @@ export class BoardViewer extends DocumentViewer<
         super.select(item);
     }
 
-    highlight_net(net: number) {
-        this.painter.paint_net(this.board, net);
+    /**
+     * Highlights a net (by number or name), replacing any selection.
+     *
+     * @param notify - whether to fire a KiCanvasNetSelectEvent. False when
+     *     the highlight comes from cross-probing.
+     */
+    highlight_net(net: number | string | null, notify = false) {
+        if (typeof net == "string") {
+            net = this.board.net_by_name(net)?.number ?? null;
+        }
+        // Net 0 means "no net".
+        this.#highlighted_net = net || null;
+        this.set_selected_quietly(null);
+
+        if (notify) {
+            this.dispatchEvent(
+                new KiCanvasNetSelectEvent({
+                    net:
+                        this.#highlighted_net === null
+                            ? null
+                            : this.board.get_netname_by_number(
+                                  this.#highlighted_net,
+                              ),
+                }),
+            );
+        }
+    }
+
+    protected override paint_selected() {
+        const highlighting = this.#highlighted_net !== null && !this.selected;
+        this.#set_dimmed(highlighting);
+
+        if (!highlighting) {
+            super.paint_selected();
+            return;
+        }
+
+        this.painter.paint_net(this.board, this.#highlighted_net!);
+        // Draw the net on top of the dimmed board, like KiCad's net
+        // highlighting.
+        const graphics = this.layers.overlay.graphics;
+        if (graphics) {
+            graphics.composite_operation = "source-over";
+        }
         this.draw();
+    }
+
+    #dimmed?: Map<ViewLayer, number | undefined>;
+
+    /** Dims everything but the overlay, or restores the original opacity. */
+    #set_dimmed(dim: boolean) {
+        if (dim && !this.#dimmed) {
+            this.#dimmed = new Map();
+            for (const layer of this.layers.in_order()) {
+                if (layer == this.layers.overlay) {
+                    continue;
+                }
+                // Opacity is undefined unless something changed it.
+                this.#dimmed.set(layer, layer.opacity);
+                layer.opacity = (layer.opacity ?? 1) * 0.35;
+            }
+        } else if (!dim && this.#dimmed) {
+            for (const [layer, opacity] of this.#dimmed) {
+                layer.opacity = opacity!;
+            }
+            this.#dimmed = undefined;
+        }
+    }
+
+    override paint() {
+        // Painting creates new layers.
+        this.#dimmed = undefined;
+        super.paint();
     }
 
     private set_layers_opacity(layers: Generator<ViewLayer>, opacity: number) {
