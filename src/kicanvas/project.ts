@@ -12,10 +12,7 @@ import { Logger } from "../base/log";
 import { basename, dirname, normalize_join } from "../base/paths";
 import { is_string, type Constructor } from "../base/types";
 import { KicadPCB, KicadSch, ProjectSettings } from "../kicad";
-import type {
-    SchematicSheet,
-    SchematicSheetInstance,
-} from "../kicad/schematic";
+import type { SchematicSheet } from "../kicad/schematic";
 import type { IFileSystem } from "./services/vfs";
 
 const log = new Logger("kicanvas:project");
@@ -164,88 +161,65 @@ export class Project extends EventTarget implements IDisposable {
     #determine_schematic_hierarchy() {
         log.info("Determining schematic hierarchy");
 
-        const paths_to_schematics = new Map<string, KicadSch>();
-        const paths_to_sheet_instances = new Map<
-            string,
-            { sheet: SchematicSheet; instance: SchematicSheetInstance }
-        >();
-
-        for (const schematic of this.schematics()) {
-            paths_to_schematics.set(`/${schematic.uuid}`, schematic);
-
-            for (const sheet of schematic.sheets) {
-                const sheet_sch = this.#files_by_name.get(
-                    sheet.sheetfile ?? "",
-                ) as KicadSch;
-
-                if (!sheet_sch) {
-                    continue;
-                }
-
-                for (const instance of sheet.instances.values()) {
-                    paths_to_schematics.set(instance.path, schematic);
-                    paths_to_sheet_instances.set(
-                        `${instance.path}/${sheet.uuid}`,
-                        {
-                            sheet: sheet,
-                            instance: instance,
-                        },
-                    );
-                }
-            }
-        }
-
-        // Find the root sheet. This is done by sorting all of the paths
-        // from shortest to longest and walking through the paths to see if
-        // we can find the schematic for the parent. The first one we find
-        // it the common ancestor (root).
-        const paths = Array.from(paths_to_sheet_instances.keys()).sort(
-            (a, b) => a.length - b.length,
-        );
-
-        let root: KicadSch | undefined;
-        for (const path of paths) {
-            const parent_path = path.split("/").slice(0, -1).join("/");
-
-            if (!parent_path) {
-                continue;
-            }
-
-            root = paths_to_schematics.get(parent_path);
-
-            if (root) {
-                break;
-            }
-        }
-
-        // If we found a root page, we can build out the list of pages by
-        // walking through paths_to_sheet with the root as page one.
-        let pages = [];
+        const root = this.#find_root_schematic();
+        let pages: ProjectPage[] = [];
 
         if (root) {
             this.#root_schematic_page = new ProjectPage(
                 this,
                 "schematic",
                 root.filename,
-                `/${root!.uuid}`,
+                `/${root.uuid}`,
                 "Root",
                 "1",
             );
             pages.push(this.#root_schematic_page);
 
-            for (const [path, sheet] of paths_to_sheet_instances.entries()) {
-                pages.push(
-                    new ProjectPage(
-                        this,
-                        "schematic",
-                        sheet.sheet.sheetfile!,
-                        path,
-                        sheet.sheet.sheetname ?? sheet.sheet.sheetfile!,
-                        sheet.instance.page ?? "",
-                        sheet.sheet,
-                    ),
-                );
-            }
+            // Walk the hierarchy from the root, like KiCad does. Schematic
+            // files that aren't reached are listed separately below.
+            const walk = (schematic: KicadSch, path: string, depth: number) => {
+                if (depth > 32) {
+                    log.warn(`Sheet hierarchy too deep at ${path}`);
+                    return;
+                }
+                for (const sheet of schematic.sheets) {
+                    if (!sheet.sheetfile) {
+                        continue;
+                    }
+                    const filename = normalize_join(
+                        dirname(schematic.filename),
+                        sheet.sheetfile,
+                    );
+                    const child = this.#files_by_name.get(filename);
+                    if (!(child instanceof KicadSch)) {
+                        continue;
+                    }
+
+                    const sheet_path = `${path}/${sheet.uuid}`;
+                    const instance =
+                        sheet.instances.get(path) ??
+                        // KiCad 6 stored sheet instances in the root
+                        // schematic, without the root's UUID.
+                        root.sheet_instances?.get(
+                            sheet_path.slice(root.uuid.length + 1),
+                        );
+
+                    pages.push(
+                        new ProjectPage(
+                            this,
+                            "schematic",
+                            child.filename,
+                            sheet_path,
+                            sheet.sheetname ?? sheet.sheetfile,
+                            instance?.page ?? "",
+                            sheet,
+                        ),
+                    );
+
+                    walk(child, sheet_path, depth + 1);
+                }
+            };
+            walk(root, `/${root.uuid}`, 0);
         }
 
         // Sort the pages we've collected so far and then insert them
@@ -284,6 +258,52 @@ export class Project extends EventTarget implements IDisposable {
         if (!this.#root_schematic_page && this.has_schematics) {
             log.error("No valid root schematic was found.");
         }
+    }
+
+    /**
+     * The root schematic is the one named after the project file, as in
+     * KiCad. Without a project file, it's the schematic that's the common
+     * ancestor of the other schematics' sheet instances.
+     */
+    #find_root_schematic(): KicadSch | undefined {
+        if (this.#project_filename) {
+            const root = this.#files_by_name.get(
+                this.#project_filename.replace(/\.kicad_pro$/, ".kicad_sch"),
+            );
+            if (root instanceof KicadSch) {
+                return root;
+            }
+        }
+
+        const paths_to_schematics = new Map<string, KicadSch>();
+        const sheet_paths: string[] = [];
+
+        for (const schematic of this.schematics()) {
+            paths_to_schematics.set(`/${schematic.uuid}`, schematic);
+
+            for (const sheet of schematic.sheets) {
+                for (const instance of sheet.instances.values()) {
+                    paths_to_schematics.set(instance.path, schematic);
+                    sheet_paths.push(`${instance.path}/${sheet.uuid}`);
+                }
+            }
+        }
+
+        // Walk through the sheet paths from shortest to longest and find the
+        // first one whose parent is a known schematic: that's the common
+        // ancestor (root).
+        sheet_paths.sort((a, b) => a.length - b.length);
+        for (const path of sheet_paths) {
+            const parent_path = path.split("/").slice(0, -1).join("/");
+            const root = parent_path && paths_to_schematics.get(parent_path);
+            if (root) {
+                return root;
+            }
+        }
+
+        // A project with a single schematic.
+        const schematics = [...this.schematics()];
+        return schematics.length == 1 ? schematics[0] : undefined;
     }
 
     public *files() {
