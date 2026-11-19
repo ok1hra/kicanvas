@@ -307,6 +307,15 @@ export class Via implements HasUniqueID, HasNetInfo {
                 P.atom("free"),
                 P.atom("remove_unused_layers"),
                 P.atom("keep_end_layers"),
+                // KiCad 9+ padstack/via properties, not rendered.
+                P.pair("start_end_only", T.boolean),
+                P.expr("zone_layer_connections"),
+                P.expr("tenting"),
+                P.expr("covering"),
+                P.expr("plugging"),
+                P.expr("capping"),
+                P.expr("filling"),
+                P.expr("padstack"),
                 P.pair("tstamp", T.string),
                 P.pair("uuid", T.string),
             ),
@@ -376,6 +385,8 @@ export class Zone implements HasUniqueID {
                 P.pair("min_thickness", T.number),
                 P.pair("filled_areas_thickness", T.boolean),
                 P.item("keepout", ZoneKeepout),
+                // KiCad 9 rule area placement settings, not rendered.
+                P.expr("placement"),
                 P.item("fill", ZoneFill),
                 P.collection("polygons", "polygon", T.item(Poly)),
                 P.collection(
@@ -513,6 +524,12 @@ export class Setup {
                 P.pair("pad_to_paste_clearance", T.number),
                 P.pair("pad_to_paste_clearance_ratio", T.number),
                 P.pair("allow_soldermask_bridges_in_footprints", T.boolean),
+                // KiCad 9 board-wide via protection defaults.
+                P.expr("tenting"),
+                P.expr("covering"),
+                P.expr("plugging"),
+                P.expr("capping"),
+                P.expr("filling"),
                 P.vec2("aux_axis_origin"),
                 P.vec2("grid_origin"),
                 P.item("pcbplotparams", PCBPlotParams),
@@ -906,6 +923,8 @@ export class Footprint implements HasUniqueID {
                 P.pair("solder_mask_margin", T.number),
                 P.pair("solder_paste_margin", T.number),
                 P.pair("solder_paste_ratio", T.number),
+                // KiCad 9 renamed solder_paste_ratio.
+                P.pair("solder_paste_margin_ratio", T.number),
                 P.pair("clearance", T.number),
                 P.pair("zone_connect", T.number),
                 P.pair("thermal_width", T.number),
@@ -922,7 +941,12 @@ export class Footprint implements HasUniqueID {
                     P.atom("exclude_from_bom"),
                     P.atom("allow_solder_mask_bridges"),
                     P.atom("allow_missing_courtyard"),
+                    P.atom("dnp"),
                 ),
+                // KiCad 10: pin groups for multi-unit footprints, and whether
+                // pads sharing a number are jumpered together.
+                P.expr("units"),
+                P.pair("duplicate_pad_numbers_are_jumpers", T.boolean),
                 P.dict("properties", "property", T.item(SymbolProperty, this)),
                 P.collection("drawings", "fp_line", T.item(FpLine, this)),
                 P.collection("drawings", "fp_circle", T.item(FpCircle, this)),
@@ -1692,6 +1716,8 @@ export class Pad implements HasUniqueID, HasNetInfo {
             P.pair("thermal_bridge_angle", T.number),
             P.pair("zone_connect", T.number),
             P.pair("tstamp", T.string),
+            // Fabrication property, e.g. pad_prop_heatsink.
+            P.pair("property", T.string),
             P.pair("uuid", T.string),
             P.pair("remove_unused_layers", T.boolean),
             P.item("drill", PadDrill),

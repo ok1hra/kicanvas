@@ -770,6 +770,26 @@ suite("kicad.schematic.KicadSch(): schematic parsing", function () {
         });
     });
 
+    test("with symbol body_style (KiCad 10)", function () {
+        const sch = new schematic.KicadSch(
+            "test.kicad_sch",
+            symbols_kicad10_sch_src,
+        );
+
+        // KiCad 10 writes (body_style N) instead of (convert N).
+        for (const sym of sch.symbols.values()) {
+            assert.equal(sym.convert, 1);
+            assert.notProperty(sym, "body_style");
+        }
+
+        const alternate = new schematic.KicadSch(
+            "test.kicad_sch",
+            symbols_kicad10_sch_src.replace("(body_style 1)", "(body_style 2)"),
+        );
+        const converts = [...alternate.symbols.values()].map((s) => s.convert);
+        assert.includeMembers(converts, [1, 2]);
+    });
+
     test("with symbols", function () {
         const sch = new schematic.KicadSch("test.kicad_sch", symbols_sch_src);
 

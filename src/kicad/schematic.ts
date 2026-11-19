@@ -608,6 +608,7 @@ export class Rectangle extends GraphicItem {
 export class Image {
     uuid?: string;
     at: At;
+    scale = 1;
     data: string;
 
     constructor(expr: Parseable) {
@@ -617,6 +618,7 @@ export class Image {
                 expr,
                 P.start("image"),
                 P.item("at", At),
+                P.pair("scale", T.number),
                 P.pair("data", T.string),
                 P.pair("uuid", T.string),
             ),
@@ -645,6 +647,7 @@ export class Text {
                 expr,
                 P.start("text"),
                 P.positional("text"),
+                P.pair("exclude_from_sim", T.boolean),
                 P.item("at", At),
                 P.item("effects", Effects),
                 P.pair("uuid", T.string),
@@ -1294,8 +1297,11 @@ export class SchematicSymbol {
             P.pair("mirror", T.string),
             P.pair("unit", T.number),
             P.pair("convert", T.number),
+            // KiCad 10 renamed "convert" to "body_style".
+            P.pair("body_style", T.number),
             P.pair("in_bom", T.boolean),
             P.pair("on_board", T.boolean),
+            P.pair("in_pos_files", T.boolean),
             P.pair("exclude_from_sim", T.boolean),
             P.pair("dnp", T.boolean),
             P.atom("fields_autoplaced"),
@@ -1349,7 +1355,14 @@ export class SchematicSymbol {
         const parsed_instances = parsed["instances"];
         delete parsed["instances"];
 
+        const body_style = parsed["body_style"];
+        delete parsed["body_style"];
+
         Object.assign(this, parsed);
+
+        if (body_style !== undefined) {
+            this.convert = body_style;
+        }
 
         // Walk through all instances and flatten them.
         for (const project of parsed_instances?.["projects"] ?? []) {
@@ -1637,6 +1650,10 @@ export class SchematicSheet {
     instances: Map<string, SchematicSheetInstance> = new Map();
     page?: string;
     path?: string;
+    exclude_from_sim = false;
+    in_bom = true;
+    on_board = true;
+    dnp = false;
 
     constructor(
         expr: Parseable,
@@ -1650,6 +1667,10 @@ export class SchematicSheet {
             P.item("stroke", Stroke),
             P.item("fill", Fill),
             P.pair("fields_autoplaced", T.boolean),
+            P.pair("exclude_from_sim", T.boolean),
+            P.pair("in_bom", T.boolean),
+            P.pair("on_board", T.boolean),
+            P.pair("dnp", T.boolean),
             P.pair("uuid", T.string),
             P.mapped_collection(
                 "properties",
