@@ -621,6 +621,19 @@ class TablePainter extends SchematicItemPainter {
 
         const bb = this.#cell_bbox(cell);
         const [ml = 0, mt = 0, mr = 0, mb = 0] = cell.margins;
+
+        // Wrap to the cell's width, like SCH_TEXTBOX::GetShownText.
+        const column_width = text.text_angle.is_vertical
+            ? bb.h - mt - mb
+            : bb.w - ml - mr;
+        text.text = StrokeFont.default().break_lines(
+            shown,
+            column_width * 10000,
+            text.attributes.size,
+            text.attributes.stroke_width,
+            text.attributes.bold,
+            text.attributes.italic,
+        );
         const pos = new Vec2(bb.x + ml, bb.y2 - mb);
 
         // Same as SCH_TEXTBOX::GetDrawPos.

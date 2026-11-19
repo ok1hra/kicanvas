@@ -51,14 +51,31 @@ suite("text.font.Font()", function () {
     });
 
     test(".break_lines()", function () {
-        // TODO
-        font.break_lines(
-            "hello world ^{1} 2 3",
+        const text = "hello world ^{1} 2 3 four five six seven";
+        const broken = font.break_lines(
+            text,
             182880,
             new Vec2(12700, 12700),
             0,
             false,
             false,
+        );
+
+        // It wraps...
+        assert.include(broken, "\n");
+        // ...without losing words, even the ones that start a new line.
+        assert.deepEqual(broken.split(/\s+/), text.split(" "));
+        // Lines that fit aren't broken.
+        assert.equal(
+            font.break_lines(
+                "a b",
+                1e9,
+                new Vec2(12700, 12700),
+                0,
+                false,
+                false,
+            ),
+            "a b",
         );
     });
 });
