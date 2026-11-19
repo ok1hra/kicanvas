@@ -11,6 +11,7 @@ import {
     CrossProbeIndex,
     footprint_path,
 } from "../../src/kicanvas/cross-probe";
+import { PartInfo, datasheet_href } from "../../src/kicanvas/part-info";
 import { Project } from "../../src/kicanvas/project";
 import { LocalFileSystem } from "../../src/kicanvas/services/vfs";
 import { SheetConnectivity } from "../../src/viewers/schematic/connectivity";
@@ -41,6 +42,12 @@ function resistor(uuid: string, ref: string, x: number) {
             (effects (font (size 1.27 1.27))))
         (property "Value" "10k" (at ${x + 2} 102 0)
             (effects (font (size 1.27 1.27))))
+        (property "Datasheet" "https://example.com/${ref}.pdf" (at ${x} 100 0)
+            (effects (font (size 1.27 1.27)) hide))
+        (property "ID" "${ref == "R1" ? "6143" : "6144"}" (at ${x} 100 0)
+            (effects (font (size 1.27 1.27)) hide))
+        (property "part_value" "10k 1%" (at ${x} 100 0)
+            (effects (font (size 1.27 1.27)) hide))
         (pin "1" (uuid "${uuid.slice(0, -1)}a"))
         (pin "2" (uuid "${uuid.slice(0, -1)}b"))
         (instances (project "demo"
@@ -191,5 +198,48 @@ suite("cross-probing: index", function () {
             index.pages_with_net("/MID").map((p) => p.project_path),
             [page.project_path],
         );
+    });
+});
+
+suite("part info", function () {
+    test("from a symbol, with its footprint", async function () {
+        const { project, page, sch, board } = await load();
+        const index = new CrossProbeIndex(project, board);
+        const r2 = sch.find_symbol("R2")!;
+        const info = PartInfo.from_symbol(
+            page,
+            r2,
+            index.footprint_for(page, r2),
+        );
+
+        assert.equal(info.reference, "R2");
+        assert.equal(info.value, "10k");
+        assert.equal(info.get("ID"), "6144");
+        assert.equal(info.get("part_value"), "10k 1%");
+        assert.equal(info.get("datasheet"), "https://example.com/R2.pdf");
+        assert.equal(info.get("Sheet"), "/");
+        assert.equal(info.get("Board side"), "Top");
+        assert.equal(info.get("Board footprint"), "R_0402");
+    });
+
+    test("from a footprint without a symbol", async function () {
+        const { board } = await load();
+        const info = PartInfo.from_footprint(board.find_footprint("R1")!);
+        assert.equal(info.reference, "R1");
+        assert.equal(info.get("Reference"), "R1");
+        assert.equal(info.get("Board side"), "Top");
+    });
+
+    test("datasheet links", function () {
+        assert.equal(
+            datasheet_href("https://example.com/a.pdf"),
+            "https://example.com/a.pdf",
+        );
+        assert.equal(datasheet_href("www.ti.com/x"), "https://www.ti.com/x");
+        assert.isUndefined(datasheet_href("~"));
+        assert.isUndefined(datasheet_href(""));
+        assert.isUndefined(datasheet_href(undefined));
+        assert.isUndefined(datasheet_href("javascript:alert(1)"));
+        assert.isUndefined(datasheet_href("${KIPRJMOD}/doc.pdf"));
     });
 });

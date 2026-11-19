@@ -12,8 +12,17 @@ import { KCUIElement, KCUIIconElement } from "../../kc-ui";
 import { sprites_url } from "../icons/sprites";
 import type { BoardViewer } from "../../viewers/board/viewer";
 import type { SchematicViewer } from "../../viewers/schematic/viewer";
-import { CrossProbe } from "../cross-probe";
+import { Footprint, KicadPCB } from "../../kicad/board";
+import { SchematicSymbol } from "../../kicad/schematic";
+import {
+    KiCanvasNetSelectEvent,
+    KiCanvasSelectEvent,
+} from "../../viewers/base/events";
+import { CrossProbe, CrossProbeIndex } from "../cross-probe";
+import { PartInfo } from "../part-info";
 import { Project } from "../project";
+import type { KCPartInfoElement } from "./common/part-info";
+import "./common/part-info";
 import { GitHubFileSystem } from "../services/github-vfs";
 import { CodebergFileSystem } from "../services/codeberg-vfs";
 import { FetchFileSystem, type IFileSystem } from "../services/vfs";
@@ -63,6 +72,11 @@ class KiCanvasShellElement extends KCUIElement {
     #schematic_app: KCSchematicAppElement;
     #board_app: KCBoardAppElement;
     #cross_probe?: CrossProbe;
+    #part_info: KCPartInfoElement;
+    #index?: CrossProbeIndex;
+    #workspace_listeners: { dispose(): void }[] = [];
+    /** Where the user last pressed the pointer, relative to <main> */
+    #last_pointer = { x: 0, y: 0 };
 
     constructor() {
         super();
@@ -93,6 +107,20 @@ class KiCanvasShellElement extends KCUIElement {
     public open_file_button: HTMLButtonElement;
 
     override initialContentCallback() {
+        // Remember where parts are clicked, to show their info there.
+        const main = this.renderRoot.querySelector("main")!;
+        main.addEventListener(
+            "pointerdown",
+            (e) => {
+                const rect = main.getBoundingClientRect();
+                this.#last_pointer = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                };
+            },
+            true,
+        );
+
         const url_params = new URLSearchParams(document.location.search);
 
         const urls = [
@@ -167,7 +195,7 @@ class KiCanvasShellElement extends KCUIElement {
             this.has_board = this.project.has_boards;
             this.project.set_active_page(this.project.first_page);
             this.loaded = true;
-            this.#setup_cross_probe();
+            this.#setup_workspace();
         } catch (e) {
             console.error(e);
         } finally {
@@ -175,29 +203,117 @@ class KiCanvasShellElement extends KCUIElement {
         }
     }
 
-    /** Keeps the schematic and board views in sync, see CrossProbe. */
-    async #setup_cross_probe() {
+    /**
+     * Sets up the things that work across both views: cross-probing and
+     * the part info card.
+     */
+    async #setup_workspace() {
         this.#cross_probe?.dispose();
         this.#cross_probe = undefined;
-
-        if (!this.project.has_schematics || !this.project.has_boards) {
-            return;
+        this.#index = undefined;
+        for (const l of this.#workspace_listeners) {
+            l.dispose();
         }
+        this.#workspace_listeners = [];
+        this.#part_info.hide();
+
+        const has_schematics = this.project.has_schematics;
+        const has_boards = this.project.has_boards;
 
         await Promise.all([
-            this.#schematic_app.viewerReady,
-            this.#board_app.viewerReady,
+            has_schematics ? this.#schematic_app.viewerReady : null,
+            has_boards ? this.#board_app.viewerReady : null,
         ]);
 
-        this.#cross_probe = new CrossProbe(
-            this.project,
-            this.#schematic_app.viewer as SchematicViewer,
-            this.#board_app.viewer as BoardViewer,
-            () => this.#schematic_app.current_page,
-        );
+        const sv = has_schematics
+            ? (this.#schematic_app.viewer as SchematicViewer)
+            : undefined;
+        const bv = has_boards
+            ? (this.#board_app.viewer as BoardViewer)
+            : undefined;
+
+        // Cross-probing must be set up first: its listeners have to run
+        // before the part info card's, see below.
+        if (sv && bv) {
+            this.#cross_probe = new CrossProbe(
+                this.project,
+                sv,
+                bv,
+                () => this.#schematic_app.current_page,
+            );
+        }
+
+        const index = () => {
+            if (!this.#index) {
+                const board = first_board(this.project);
+                if (board) {
+                    this.#index = new CrossProbeIndex(this.project, board);
+                }
+            }
+            return this.#index;
+        };
+
+        // Show the part info card for the clicked part. When cross-probing
+        // selects the part in the other view too, the card just stays.
+        const card = this.#part_info;
+        if (sv) {
+            this.#workspace_listeners.push(
+                sv.addEventListener(KiCanvasSelectEvent.type, (e) => {
+                    const item = e.detail.item;
+                    const page = this.#schematic_app.current_page;
+                    if (
+                        item instanceof SchematicSymbol &&
+                        !item.lib_symbol.power &&
+                        page
+                    ) {
+                        card.show(
+                            PartInfo.from_symbol(
+                                page,
+                                item,
+                                index()?.footprint_for(page, item),
+                            ),
+                            this.#last_pointer,
+                        );
+                    } else {
+                        card.hide();
+                    }
+                }),
+                sv.addEventListener(KiCanvasNetSelectEvent.type, () =>
+                    card.hide(),
+                ),
+            );
+        }
+        if (bv) {
+            this.#workspace_listeners.push(
+                bv.addEventListener(KiCanvasSelectEvent.type, (e) => {
+                    const item = e.detail.item;
+                    if (item instanceof Footprint) {
+                        const placement = index()?.symbols_for(item)[0];
+                        card.show(
+                            placement
+                                ? PartInfo.from_symbol(
+                                      placement.page,
+                                      placement.symbol,
+                                      item,
+                                  )
+                                : PartInfo.from_footprint(item),
+                            this.#last_pointer,
+                        );
+                    } else {
+                        card.hide();
+                    }
+                }),
+                bv.addEventListener(KiCanvasNetSelectEvent.type, () =>
+                    card.hide(),
+                ),
+            );
+        }
     }
 
     override render() {
+        this.#part_info =
+            html`<kc-part-info></kc-part-info>` as KCPartInfoElement;
+
         this.#schematic_app = html`
             <kc-schematic-app controls="floating"></kc-schematic-app>
         ` as KCSchematicAppElement;
@@ -282,10 +398,18 @@ class KiCanvasShellElement extends KCUIElement {
                     <div class="pane left">${this.#schematic_app}</div>
                     <kc-ui-divider storage-key="workspace"></kc-ui-divider>
                     <div class="pane right">${this.#board_app}</div>
+                    ${this.#part_info}
                 </main>
             </kc-ui-app>
         `;
     }
+}
+
+function first_board(project: Project): KicadPCB | undefined {
+    for (const board of project.boards()) {
+        return board;
+    }
+    return undefined;
 }
 
 window.customElements.define("kc-kicanvas-shell", KiCanvasShellElement);
