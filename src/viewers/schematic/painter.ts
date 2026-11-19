@@ -4,7 +4,14 @@
     Full text available at: https://opensource.org/licenses/MIT
 */
 
-import { Angle, BBox, Arc as MathArc, Matrix3, Vec2 } from "../../base/math";
+import {
+    Angle,
+    BBox,
+    Arc as MathArc,
+    Matrix3,
+    Vec2,
+    cubic_bezier_points,
+} from "../../base/math";
 import {
     Arc,
     Circle,
@@ -116,6 +123,77 @@ class PolylinePainter extends SchematicItemPainter {
         }
 
         this.gfx.polygon(new Polygon(pl.pts, color));
+    }
+}
+
+/** Decoded images, shared between paints. */
+const decoded_images = new WeakMap<schematic_items.Image, HTMLImageElement>();
+
+/** Fired on window when an image finished decoding, so viewers redraw. */
+export const image_loaded_event = "kicanvas:image-loaded";
+
+class ImagePainter extends SchematicItemPainter {
+    classes = [schematic_items.Image];
+
+    layers_for(item: schematic_items.Image) {
+        return [LayerNames.bitmap];
+    }
+
+    paint(layer: ViewLayer, image: schematic_items.Image) {
+        const size = image.size;
+        if (!size || !image.data) {
+            return;
+        }
+
+        let element = decoded_images.get(image);
+        if (!element) {
+            element = new window.Image();
+            element.addEventListener("load", () =>
+                window.dispatchEvent(new Event(image_loaded_event)),
+            );
+            element.src = image.data_url;
+            decoded_images.set(image, element);
+        }
+
+        // Images are centered on their position.
+        const center = image.at.position;
+        this.gfx.image(
+            element,
+            new BBox(
+                center.x - size.x / 2,
+                center.y - size.y / 2,
+                size.x,
+                size.y,
+            ),
+        );
+    }
+}
+
+class BezierPainter extends SchematicItemPainter {
+    classes = [schematic_items.Bezier];
+
+    layers_for(item: schematic_items.Bezier) {
+        return [LayerNames.notes];
+    }
+
+    paint(layer: ViewLayer, b: schematic_items.Bezier) {
+        const [p0, p1, p2, p3] = b.pts;
+        if (!p0 || !p1 || !p2 || !p3) {
+            return;
+        }
+        const pts = cubic_bezier_points(p0, p1, p2, p3);
+
+        const fill = this.determine_fill(layer, b);
+        if (fill) {
+            this.gfx.polygon(new Polygon(pts, fill));
+        }
+
+        const { width, color } = this.determine_stroke(layer, b);
+        if (width && color) {
+            StrokePainter.line(pts, width, b.stroke_params, (lines) =>
+                this.gfx.line(lines, width, color),
+            );
+        }
     }
 }
 
@@ -543,6 +621,19 @@ class TablePainter extends SchematicItemPainter {
 
         const bb = this.#cell_bbox(cell);
         const [ml = 0, mt = 0, mr = 0, mb = 0] = cell.margins;
+
+        // Wrap to the cell's width, like SCH_TEXTBOX::GetShownText.
+        const column_width = text.text_angle.is_vertical
+            ? bb.h - mt - mb
+            : bb.w - ml - mr;
+        text.text = StrokeFont.default().break_lines(
+            shown,
+            column_width * 10000,
+            text.attributes.size,
+            text.attributes.stroke_width,
+            text.attributes.bold,
+            text.attributes.italic,
+        );
         const pos = new Vec2(bb.x + ml, bb.y2 - mb);
 
         // Same as SCH_TEXTBOX::GetDrawPos.
@@ -879,6 +970,8 @@ export class SchematicPainter extends BaseSchematicPainter {
         this.painter_list = [
             new RectanglePainter(this, gfx),
             new PolylinePainter(this, gfx),
+            new BezierPainter(this, gfx),
+            new ImagePainter(this, gfx),
             new RuleAreaPainter(this, gfx),
             new WirePainter(this, gfx),
             new BusPainter(this, gfx),

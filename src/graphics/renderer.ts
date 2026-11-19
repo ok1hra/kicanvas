@@ -272,6 +272,14 @@ export abstract class Renderer implements IDisposable {
     /**
      * Draw a filled polygon
      */
+    /**
+     * Draws an image into the given box (in world coordinates). Renderers
+     * that can't draw images just account for its bounding box.
+     */
+    image(image: HTMLImageElement, bbox: BBox): void {
+        this.add_bbox(bbox);
+    }
+
     abstract polygon(polygon: Polygon): void;
     abstract polygon(points: Vec2[], color?: Color): void;
     abstract polygon(polygon_or_points: Polygon | Vec2[], color?: Color): void;

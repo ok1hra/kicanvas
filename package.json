@@ -37,6 +37,7 @@
         "format": "prettier . --write",
         "serve": "node scripts/serve.js",
         "render-check": "node scripts/render-check.js",
+        "kicad-compare": "node scripts/kicad-compare.js",
         "build:no-check": "node scripts/build.js",
         "build:font": "node scripts/build-font.js",
         "build:sprites": "node scripts/build-sprites.js",

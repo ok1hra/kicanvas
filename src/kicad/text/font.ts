@@ -136,17 +136,22 @@ export abstract class Font {
 
             const words = this.wordbreak_markup(in_line, glyph_size, style);
 
-            for (const { word, width } of words) {
+            // Like KiCad, only advance once a word is placed: a word that
+            // doesn't fit starts the next line.
+            for (let i = 0; i < words.length; ) {
+                const { word, width } = words[i]!;
                 if (unset_line) {
                     out_text += word;
                     line_width += width;
                     unset_line = false;
+                    i++;
                 } else if (
                     line_width + space_width + width <
                     column_width - thickness
                 ) {
                     out_text += " " + word;
                     line_width += space_width + width;
+                    i++;
                 } else {
                     out_text += "\n";
                     line_width = 0;

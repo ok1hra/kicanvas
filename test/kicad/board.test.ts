@@ -1099,3 +1099,38 @@ suite("kicad.board.Footprint()", function () {
         } as Partial<board.SymbolProperty>);
     });
 });
+
+suite("kicad.board: curves", function () {
+    test("gr_curve and fp_curve become polylines", function () {
+        const pcb = new board.KicadPCB(
+            "curves.kicad_pcb",
+            `(kicad_pcb (version 20240108) (generator "pcbnew")
+                (general (thickness 1.6)) (paper "A4")
+                (layers (0 "F.Cu" signal) (37 "F.SilkS" user))
+                (footprint "Logo" (layer "F.Cu") (at 10 10)
+                    (fp_curve (pts (xy 0 0) (xy 0 1) (xy 1 1) (xy 1 0))
+                        (stroke (width 0.2) (type solid)) (layer "F.SilkS")))
+                (gr_curve (pts (xy 0 0) (xy 0 10) (xy 10 10) (xy 10 0))
+                    (stroke (width 0.15) (type solid)) (layer "F.SilkS")))`,
+        );
+
+        const curve = pcb.drawings.find((d) => d instanceof board.GrCurve) as
+            | board.GrCurve
+            | undefined;
+        assert.exists(curve);
+        assert.equal(curve!.width, 0.15);
+        const pts = curve!.polyline;
+        assert.isAbove(pts.length, 8);
+        assert.deepInclude(pts[0], { x: 0, y: 0 });
+        assert.deepInclude(pts.at(-1), { x: 10, y: 0 });
+        // The middle of this symmetric curve is at (5, 7.5).
+        const mid = pts[Math.floor(pts.length / 2)]!;
+        assert.closeTo(mid.x, 5, 0.6);
+        assert.closeTo(mid.y, 7.5, 0.3);
+
+        const fp_curve = pcb.footprints[0]!.drawings.find(
+            (d) => d instanceof board.FpCurve,
+        );
+        assert.exists(fp_curve);
+    });
+});

@@ -4,7 +4,14 @@
     Full text available at: https://opensource.org/licenses/MIT
 */
 
-import { Angle, BBox, Arc as MathArc, Matrix3, Vec2 } from "../base/math";
+import {
+    Angle,
+    BBox,
+    Arc as MathArc,
+    Matrix3,
+    Vec2,
+    cubic_bezier_points,
+} from "../base/math";
 import type { Project } from "../kicanvas/project";
 import {
     At,
@@ -28,6 +35,7 @@ export type Drawing =
     | GrCircle
     | GrArc
     | GrPoly
+    | GrCurve
     | GrRect
     | GrText
     | Dimension;
@@ -99,9 +107,13 @@ export class KicadPCB {
                 P.collection("drawings", "gr_circle", T.item(GrCircle, this)),
                 P.collection("drawings", "gr_arc", T.item(GrArc, this)),
                 P.collection("drawings", "gr_poly", T.item(GrPoly, this)),
+                P.collection("drawings", "gr_curve", T.item(GrCurve, this)),
                 P.collection("drawings", "gr_rect", T.item(GrRect, this)),
                 P.collection("drawings", "gr_text", T.item(GrText, this)),
                 P.collection("groups", "group", T.item(Group)),
+                // KiCad 9 generated objects (e.g. tuning patterns), not
+                // rendered: their tracks are regular items.
+                P.collection("generated", "generated", T.any),
                 P.pair("embedded_fonts", T.boolean),
                 P.list("embedded_files", T.item(EmbeddedFile)),
             ),
@@ -904,6 +916,7 @@ type FootprintDrawings =
     | FpCircle
     | FpArc
     | FpPoly
+    | FpCurve
     | FpRect
     | FpText
     | SymbolProperty;
@@ -1023,6 +1036,7 @@ export class Footprint implements HasUniqueID {
                 P.collection("drawings", "fp_circle", T.item(FpCircle, this)),
                 P.collection("drawings", "fp_arc", T.item(FpArc, this)),
                 P.collection("drawings", "fp_poly", T.item(FpPoly, this)),
+                P.collection("drawings", "fp_curve", T.item(FpCurve, this)),
                 P.collection("drawings", "fp_rect", T.item(FpRect, this)),
                 P.collection("drawings", "fp_text", T.item(FpText, this)),
                 P.collection("zones", "zone", T.item(Zone, this)),
@@ -1557,6 +1571,65 @@ export class GrPoly extends Poly {
 
 export class FpPoly extends Poly {
     static override expr_start = "fp_poly";
+}
+
+/** A cubic Bezier curve: (pts start control1 control2 end). */
+export class Curve extends GraphicItem {
+    static expr_start = "bezier";
+
+    pts: Vec2[] = [];
+    width: number;
+
+    #polyline_pts: Vec2[];
+
+    constructor(
+        expr: Parseable,
+        public override parent?: Footprint | KicadPCB,
+    ) {
+        super();
+
+        const static_this = this.constructor as typeof Curve;
+
+        Object.assign(
+            this,
+            parse_expr(
+                expr,
+                P.start(static_this.expr_start),
+                P.atom("locked"),
+                P.pair("layer", T.string),
+                P.list("pts", T.vec2),
+                P.pair("width", T.number),
+                P.pair("uuid", T.string),
+                P.pair("tstamp", T.string),
+                P.item("stroke", Stroke),
+            ),
+        );
+
+        this.width ??= this.stroke?.width || 0;
+
+        const [p0, p1, p2, p3] = this.pts;
+        this.#polyline_pts =
+            p0 && p1 && p2 && p3
+                ? cubic_bezier_points(p0, p1, p2, p3)
+                : [...this.pts];
+    }
+
+    /** The curve as a polyline */
+    get polyline() {
+        return this.#polyline_pts;
+    }
+
+    override get bbox(): BBox {
+        return BBox.from_points(this.#polyline_pts);
+    }
+}
+
+export class GrCurve extends Curve {
+    static override expr_start = "gr_curve";
+}
+
+export class FpCurve extends Curve {
+    static override expr_start = "fp_curve";
 }
 
 export class Rect extends GraphicItem {

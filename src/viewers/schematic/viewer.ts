@@ -21,7 +21,7 @@ import { KiCanvasNetSelectEvent } from "../base/events";
 import { ViewLayerNames, type ViewLayerSet } from "../base/view-layers";
 import { SheetConnectivity, type SheetNet } from "./connectivity";
 import { LayerSet } from "./layers";
-import { SchematicPainter } from "./painter";
+import { SchematicPainter, image_loaded_event } from "./painter";
 
 export class SchematicViewer extends DocumentViewer<
     KicadSch,
@@ -124,6 +124,17 @@ export class SchematicViewer extends DocumentViewer<
 
         layer.graphics = this.renderer.end_layer();
         this.draw();
+    }
+
+    override async setup() {
+        await super.setup();
+        // Redraw once images in the schematic finish decoding.
+        const redraw = () => this.draw();
+        window.addEventListener(image_loaded_event, redraw);
+        this.disposables.add({
+            dispose: () =>
+                window.removeEventListener(image_loaded_event, redraw),
+        });
     }
 
     override create_renderer(canvas: HTMLCanvasElement): Renderer {

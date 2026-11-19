@@ -10,3 +10,6 @@ docs/site
 CODE_OF_CONDUCT.md
 package-lock.json
 src/kicad/text/newstroke-glyphs.ts
+debug/render-check
+debug/kicad-compare
+debug/kicad-ref
