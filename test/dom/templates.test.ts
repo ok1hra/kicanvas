@@ -122,6 +122,45 @@ suite("dom.templates", function () {
         );
     });
 
+    test("attribute placeholders never reach the live document", function () {
+        // Elements are imported into the live document only after their
+        // attributes are bound, otherwise the browser sees placeholder values
+        // (and fetches placeholder URLs for things like <img src> or
+        // <use href>).
+        const seen: (string | null)[] = [];
+
+        class PlaceholderProbeElement extends HTMLElement {
+            static observedAttributes = ["value"];
+
+            attributeChangedCallback(
+                _name: string,
+                _old: string | null,
+                value: string | null,
+            ) {
+                seen.push(value);
+            }
+        }
+        customElements.define(
+            "kc-test-placeholder-probe",
+            PlaceholderProbeElement,
+        );
+
+        const elm = html`<kc-test-placeholder-probe
+            value="${"real"}"></kc-test-placeholder-probe>`;
+
+        assert.instanceOf(elm, PlaceholderProbeElement);
+        assert.deepEqual(seen, ["real"]);
+        assert.equal(elm.getAttribute("value"), "real");
+    });
+
+    test("boolean attribute interpolation before import", function () {
+        const elm = html`<input
+            disabled="${true}"
+            readonly="${false}"
+            name="${"n"}" />`;
+        assert.dom.equal(elm, `<input disabled="" name="n" />`);
+    });
+
     test("top-level interpolation with multiple children", function () {
         const child1 = html`<div>1</div>`;
         const child2 = html`<div>2</div>`;
