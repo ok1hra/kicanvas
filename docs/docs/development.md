@@ -19,11 +19,11 @@ Contributions are welcome! However, since KiCanvas is in a super early stage ple
 `npm run render-check` loads KiCad files into the standalone viewer in headless Chrome, takes a screenshot of every page, and reports browser errors and the file tokens the parser skipped:
 
 ```sh
-npm run render-check -- path/to/project/ --out build/render-check
+npm run render-check -- path/to/project/
 npm run render-check -- path/to/project/ --pages "Board,Power,mcu.kicad_sch"
 ```
 
-A directory argument loads the `.kicad_pro`, `.kicad_sch` and `.kicad_pcb` files directly inside it. The script exits with status 1 when loading fails or the browser reports an error, so it can also be used as a smoke test. It needs Chrome or Chromium; set `CHROME_PATH` or pass `--chrome` if it isn't found automatically. Run it with `--help` for all options.
+Screenshots go to `debug/render-check/` by default (ignored by git, and not under `build/`, which is published with the docs). A directory argument loads the `.kicad_pro`, `.kicad_sch` and `.kicad_pcb` files directly inside it. The script exits with status 1 when loading fails or the browser reports an error, so it can also be used as a smoke test. It needs Chrome or Chromium; set `CHROME_PATH` or pass `--chrome` if it isn't found automatically. Run it with `--help` for all options.
 
 ## Technical overview
 

@@ -26,7 +26,7 @@ browser errors. A directory argument adds the KiCad files directly inside it
 (not subdirectories).
 
 Options:
-  --out <dir>       screenshot directory (default: build/render-check)
+  --out <dir>       screenshot directory (default: debug/render-check)
   --pages <list>    "all" (default), "first", or a comma-separated list of
                     file names and/or sheet names to capture
   --width <px>      viewport width (default: 1600)
@@ -107,7 +107,7 @@ function slug(s) {
 const { values: opts, positionals } = parseArgs({
     allowPositionals: true,
     options: {
-        out: { type: "string", default: "build/render-check" },
+        out: { type: "string", default: "debug/render-check" },
         pages: { type: "string", default: "all" },
         width: { type: "string", default: "1600" },
         height: { type: "string", default: "1000" },
