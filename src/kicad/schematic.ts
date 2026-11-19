@@ -83,6 +83,7 @@ export class KicadSch {
     rule_areas: RuleArea[] = [];
     netclass_flags: DirectiveLabel[] = [];
     images: Image[] = [];
+    tables: Table[] = [];
     sheet_instances?: SheetInstances;
     symbol_instances?: SymbolInstances;
     sheets: SchematicSheet[] = [];
@@ -134,6 +135,7 @@ export class KicadSch {
                 P.collection("drawings", "text", T.item(Text, this)),
                 P.collection("drawings", "circle", T.item(Circle, this)),
                 P.collection("rule_areas", "rule_area", T.item(RuleArea, this)),
+                P.collection("tables", "table", T.item(Table, this)),
                 P.collection(
                     "netclass_flags",
                     "netclass_flag",
@@ -229,6 +231,7 @@ export class KicadSch {
         yield* this.symbols.values();
         yield* this.drawings;
         yield* this.rule_areas;
+        yield* this.tables;
         yield* this.images;
         yield* this.sheets;
     }
@@ -686,6 +689,7 @@ export class Rectangle extends GraphicItem {
 export class Image {
     uuid?: string;
     at: At;
+    scale = 1;
     data: string;
 
     constructor(expr: Parseable) {
@@ -695,6 +699,7 @@ export class Image {
                 expr,
                 P.start("image"),
                 P.item("at", At),
+                P.pair("scale", T.number),
                 P.pair("data", T.string),
                 P.pair("uuid", T.string),
             ),
@@ -723,6 +728,7 @@ export class Text {
                 expr,
                 P.start("text"),
                 P.positional("text"),
+                P.pair("exclude_from_sim", T.boolean),
                 P.item("at", At),
                 P.item("effects", Effects),
                 P.pair("uuid", T.string),
@@ -777,6 +783,128 @@ export class TextBox extends GraphicItem {
                 ...GraphicItem.common_expr_defs,
             ),
         );
+    }
+}
+
+/**
+ * A cell of a schematic table, which is a text box. KiCad 8+.
+ *
+ * (table_cell "text" (exclude_from_sim no) (at 109.22 99.06 0)
+ *   (size 11.43 3.81) (margins 0.95 0.95 0.95 0.95) (span 1 1)
+ *   (fill (type none)) (effects ...) (uuid ...))
+ */
+export class TableCell {
+    text: string;
+    exclude_from_sim = false;
+    at: At;
+    size: Vec2;
+    /** left, top, right, bottom */
+    margins: number[] = [];
+    /** column span, row span. Cells covered by another cell's span are 0. */
+    span: number[] = [1, 1];
+    fill?: Fill;
+    effects = new Effects();
+    uuid?: string;
+
+    constructor(
+        expr: Parseable,
+        public parent: Table,
+    ) {
+        Object.assign(
+            this,
+            parse_expr(
+                expr,
+                P.start("table_cell"),
+                P.positional("text", T.string),
+                P.pair("exclude_from_sim", T.boolean),
+                P.item("at", At),
+                P.vec2("size"),
+                P.list("margins", T.number),
+                P.list("span", T.number),
+                P.item("fill", Fill),
+                P.item("effects", Effects),
+                P.pair("uuid", T.string),
+            ),
+        );
+    }
+
+    /** Whether this cell is hidden by another cell's span */
+    get covered() {
+        return (this.span[0] ?? 1) < 1 || (this.span[1] ?? 1) < 1;
+    }
+
+    get shown_text() {
+        return expand_text_vars(this.text, this.parent.parent);
+    }
+}
+
+/**
+ * A schematic table. KiCad 8+.
+ *
+ * Cells are stored row by row, and each knows its own position and size.
+ */
+export class Table {
+    column_count = 1;
+    border: { external: boolean; header: boolean; stroke?: Stroke } = {
+        external: true,
+        header: true,
+    };
+    separators: { rows: boolean; cols: boolean; stroke?: Stroke } = {
+        rows: true,
+        cols: true,
+    };
+    column_widths: number[] = [];
+    row_heights: number[] = [];
+    cells: TableCell[] = [];
+    uuid?: string;
+
+    constructor(
+        expr: Parseable,
+        public parent: KicadSch,
+    ) {
+        const parsed = parse_expr(
+            expr,
+            P.start("table"),
+            P.pair("column_count", T.number),
+            P.object(
+                "border",
+                {},
+                P.pair("external", T.boolean),
+                P.pair("header", T.boolean),
+                P.item("stroke", Stroke),
+            ),
+            P.object(
+                "separators",
+                {},
+                P.pair("rows", T.boolean),
+                P.pair("cols", T.boolean),
+                P.item("stroke", Stroke),
+            ),
+            P.list("column_widths", T.number),
+            P.list("row_heights", T.number),
+            P.pair("uuid", T.string),
+            P.list("cells", T.item(TableCell, this)),
+        );
+
+        // Keep the defaults for anything not given in the file.
+        this.border = { ...this.border, ...parsed["border"] };
+        this.separators = { ...this.separators, ...parsed["separators"] };
+        delete parsed["border"];
+        delete parsed["separators"];
+
+        Object.assign(this, parsed);
+    }
+
+    get row_count() {
+        return Math.ceil(this.cells.length / Math.max(1, this.column_count));
+    }
+
+    cell(row: number, col: number): TableCell | undefined {
+        return this.cells[row * this.column_count + col];
+    }
+
+    resolve_text_var(name: string): string | undefined {
+        return this.parent.resolve_text_var(name);
     }
 }
 
@@ -1372,8 +1500,11 @@ export class SchematicSymbol {
             P.pair("mirror", T.string),
             P.pair("unit", T.number),
             P.pair("convert", T.number),
+            // KiCad 10 renamed "convert" to "body_style".
+            P.pair("body_style", T.number),
             P.pair("in_bom", T.boolean),
             P.pair("on_board", T.boolean),
+            P.pair("in_pos_files", T.boolean),
             P.pair("exclude_from_sim", T.boolean),
             P.pair("dnp", T.boolean),
             P.atom("fields_autoplaced"),
@@ -1427,7 +1558,14 @@ export class SchematicSymbol {
         const parsed_instances = parsed["instances"];
         delete parsed["instances"];
 
+        const body_style = parsed["body_style"];
+        delete parsed["body_style"];
+
         Object.assign(this, parsed);
+
+        if (body_style !== undefined) {
+            this.convert = body_style;
+        }
 
         // Walk through all instances and flatten them.
         for (const project of parsed_instances?.["projects"] ?? []) {
@@ -1715,6 +1853,10 @@ export class SchematicSheet {
     instances: Map<string, SchematicSheetInstance> = new Map();
     page?: string;
     path?: string;
+    exclude_from_sim = false;
+    in_bom = true;
+    on_board = true;
+    dnp = false;
 
     constructor(
         expr: Parseable,
@@ -1728,6 +1870,10 @@ export class SchematicSheet {
             P.item("stroke", Stroke),
             P.item("fill", Fill),
             P.pair("fields_autoplaced", T.boolean),
+            P.pair("exclude_from_sim", T.boolean),
+            P.pair("in_bom", T.boolean),
+            P.pair("on_board", T.boolean),
+            P.pair("dnp", T.boolean),
             P.pair("uuid", T.string),
             P.mapped_collection(
                 "properties",

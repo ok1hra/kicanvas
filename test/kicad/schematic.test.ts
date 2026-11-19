@@ -17,6 +17,7 @@ import drawings_kicad9_sch_src from "./files/drawings_kicad9.kicad_sch";
 import symbols_sch_src from "./files/symbols.kicad_sch";
 import symbols_kicad8_sch_src from "./files/symbols_kicad8.kicad_sch";
 import symbols_kicad10_sch_src from "./files/symbols_kicad10.kicad_sch";
+import tables_sch_src from "./files/tables.kicad_sch";
 
 suite("kicad.schematic.KicadSch(): schematic parsing", function () {
     test("with empty schematic file", function () {
@@ -768,6 +769,64 @@ suite("kicad.schematic.KicadSch(): schematic parsing", function () {
             name: "Value",
             text: "GND",
         });
+    });
+
+    test("with symbol body_style (KiCad 10)", function () {
+        const sch = new schematic.KicadSch(
+            "test.kicad_sch",
+            symbols_kicad10_sch_src,
+        );
+
+        // KiCad 10 writes (body_style N) instead of (convert N).
+        for (const sym of sch.symbols.values()) {
+            assert.equal(sym.convert, 1);
+            assert.notProperty(sym, "body_style");
+        }
+
+        const alternate = new schematic.KicadSch(
+            "test.kicad_sch",
+            symbols_kicad10_sch_src.replace("(body_style 1)", "(body_style 2)"),
+        );
+        const converts = [...alternate.symbols.values()].map((s) => s.convert);
+        assert.includeMembers(converts, [1, 2]);
+    });
+
+    test("with tables", function () {
+        const sch = new schematic.KicadSch("test.kicad_sch", tables_sch_src);
+
+        assert.equal(sch.tables.length, 1);
+        assert.include([...sch.items()], sch.tables[0]);
+
+        const table = sch.tables[0]!;
+        assert_deep_partial(table, {
+            column_count: 2,
+            column_widths: [12.7, 20.32],
+            row_heights: [3.81, 3.81, 3.81],
+            border: { external: true, header: true, stroke: { width: 0.254 } },
+            separators: { rows: false, cols: true, stroke: { type: "dash" } },
+        });
+        assert.equal(table.row_count, 3);
+        assert.equal(table.cells.length, 6);
+
+        const header = table.cell(0, 1)!;
+        assert_deep_partial(header, {
+            text: "Signal",
+            at: { position: { x: 63.5, y: 50.8 } },
+            size: { x: 20.32, y: 3.81 },
+            margins: [0.9525, 0.9525, 0.9525, 0.9525],
+            span: [1, 1],
+            effects: {
+                font: { bold: true },
+                justify: { horizontal: "left", vertical: "top" },
+            },
+        });
+        assert.isFalse(header.covered);
+        assert.equal(table.cell(0, 0)!.fill?.type, "color");
+        assert.equal(table.cell(2, 0)!.text, "2");
+
+        // Cell text goes through the schematic's text variables.
+        assert.equal(table.cell(2, 1)!.shown_text, "${SHEETNAME}");
+        assert.equal(table.cell(1, 1)!.shown_text, "VCC");
     });
 
     test("with symbols", function () {
