@@ -25,6 +25,17 @@ npm run render-check -- path/to/project/ --pages "Board,Power,mcu.kicad_sch"
 
 Screenshots go to `debug/render-check/` by default (ignored by git, and not under `build/`, which is published with the docs). A directory argument loads the `.kicad_pro`, `.kicad_sch` and `.kicad_pcb` files directly inside it. The script exits with status 1 when loading fails or the browser reports an error, so it can also be used as a smoke test. It needs Chrome or Chromium; set `CHROME_PATH` or pass `--chrome` if it isn't found automatically. Run it with `--help` for all options.
 
+### Comparing with KiCad
+
+`npm run kicad-compare` renders a project's schematic sheets and board copper layers with KiCad's `kicad-cli` and with KiCanvas, and measures how well they match:
+
+```sh
+npm run kicad-compare -- path/to/project/
+npm run kicad-compare -- path/to/project/ --sheets "Power,MCU" --layers F.Cu,B.Cu
+```
+
+For each sheet and layer it reports recall (how much of KiCad's drawing KiCanvas also draws) and precision (how much of KiCanvas' drawing KiCad also draws), and writes the images, a diff (red: only KiCad, blue: only KiCanvas) and an `index.html` report to `debug/kicad-compare/<project>/`. It uses the official KiCad flatpak (`org.kicad.KiCad`) if it's installed; set `KICAD_CLI` or pass `--kicad-cli` to use another `kicad-cli`. Use a KiCad version that can read the project's files.
+
 ## Technical overview
 
 KiCanvas is written in modern vanilla [TypeScript] and uses the [Canvas] element and [WebGL] for rendering. KiCanvas's user interface is built using [Web Components].
