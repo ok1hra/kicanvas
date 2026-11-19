@@ -21,6 +21,7 @@
         "eslint-plugin-mocha": "^10.2.0",
         "html-minifier-terser": "^7.2.0",
         "prettier": "^3.7.4",
+        "puppeteer-core": "^24.32.1",
         "svgstore": "^3.0.1",
         "typescript": "^5.9.3",
         "typescript-lit-html-plugin": "^0.9.0"
@@ -35,6 +36,7 @@
         "lint": "npm run lint:eslint && npm run lint:types && npm run lint:prettier",
         "format": "prettier . --write",
         "serve": "node scripts/serve.js",
+        "render-check": "node scripts/render-check.js",
         "build:no-check": "node scripts/build.js",
         "build:font": "node scripts/build-font.js",
         "build:sprites": "node scripts/build-sprites.js",
