@@ -7,9 +7,9 @@
 import { sorted_by_numeric_strings } from "../base/array";
 import { Barrier } from "../base/async";
 import { type IDisposable } from "../base/disposable";
-import { first, length, map } from "../base/iterator";
+import { filter, first, length, map } from "../base/iterator";
 import { Logger } from "../base/log";
-import { dirname, normalize_join } from "../base/paths";
+import { basename, dirname, normalize_join } from "../base/paths";
 import { is_string, type Constructor } from "../base/types";
 import { KicadPCB, KicadSch, ProjectSettings } from "../kicad";
 import type {
@@ -25,6 +25,7 @@ export class Project extends EventTarget implements IDisposable {
     #files_by_name: Map<string, KicadPCB | KicadSch | null> = new Map();
     #pages_by_path: Map<string, ProjectPage> = new Map();
     #root_schematic_page?: ProjectPage;
+    #project_filename?: string;
 
     public loaded: Barrier = new Barrier();
     public settings: ProjectSettings = new ProjectSettings();
@@ -40,6 +41,8 @@ export class Project extends EventTarget implements IDisposable {
         this.settings = new ProjectSettings();
         this.#files_by_name.clear();
         this.#pages_by_path.clear();
+        this.#root_schematic_page = undefined;
+        this.#project_filename = undefined;
 
         this.#fs = fs;
 
@@ -151,6 +154,7 @@ export class Project extends EventTarget implements IDisposable {
         const text = await this.#get_file_text(filename);
         const data = JSON.parse(text);
         this.settings = ProjectSettings.load(data);
+        this.#project_filename = filename;
     }
 
     async #get_file_text(filename: string) {
@@ -238,6 +242,7 @@ export class Project extends EventTarget implements IDisposable {
                         path,
                         sheet.sheet.sheetname ?? sheet.sheet.sheetfile!,
                         sheet.instance.page ?? "",
+                        sheet.sheet,
                     ),
                 );
             }
@@ -270,8 +275,11 @@ export class Project extends EventTarget implements IDisposable {
             }
         }
 
-        // Finally, if no root schematic was found, just use the first one we saw.
-        this.#root_schematic_page = first(this.#pages_by_path.values());
+        // Finally, if no root schematic was found, just use the first one we
+        // saw. Note that boards are pages too, so they must be skipped.
+        this.#root_schematic_page ??= first(
+            filter(this.#pages_by_path.values(), (p) => p.type == "schematic"),
+        );
 
         if (!this.#root_schematic_page) {
             log.error("No vaild root schematic was found.");
@@ -326,6 +334,81 @@ export class Project extends EventTarget implements IDisposable {
         return this.#pages_by_path.get(project_path);
     }
 
+    /** Find the schematic page for a hierarchical sheet path */
+    public page_by_sheet_path(sheet_path: string) {
+        for (const page of this.#pages_by_path.values()) {
+            if (page.type == "schematic" && page.sheet_path == sheet_path) {
+                return page;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * The project's name, as used for ${PROJECTNAME}: the name of the
+     * .kicad_pro file, or of the root schematic if there isn't one.
+     */
+    public get name(): string {
+        const filename =
+            this.#project_filename ??
+            this.#root_schematic_page?.filename ??
+            first(this.files())?.filename ??
+            "";
+        return basename(filename).replace(/\.kicad_(pro|sch|pcb)$/, "");
+    }
+
+    /**
+     * Number of sheets in the schematic hierarchy, as used for ${##}.
+     */
+    public get sheet_count(): number {
+        return length(
+            filter(
+                this.#pages_by_path.values(),
+                (p) => p.type == "schematic" && p.page !== undefined,
+            ),
+        );
+    }
+
+    /**
+     * Human readable sheet path, like KiCad's SCH_SHEET_PATH::PathHumanReadable.
+     *
+     * For example, "/" for the root sheet and "/Power/Regulator/" for a sheet
+     * named "Regulator" inside of a sheet named "Power".
+     */
+    public human_sheet_path(sheet_path: string): string {
+        const parts = sheet_path.split("/").filter(Boolean);
+        const names = [];
+
+        // The first part is the root sheet, which isn't named in the path.
+        for (let i = 2; i <= parts.length; i++) {
+            const page = this.page_by_sheet_path(
+                `/${parts.slice(0, i).join("/")}`,
+            );
+            names.push(page?.sheet?.sheetname ?? page?.name ?? parts[i - 1]);
+        }
+
+        return names.length ? `/${names.join("/")}/` : "/";
+    }
+
+    /**
+     * Resolve project-level text variables, see PROJECT::TextVarResolver.
+     */
+    public resolve_text_var(name: string): string | undefined {
+        switch (name) {
+            case "PROJECTNAME":
+                return this.name;
+            case "CURRENT_DATE":
+                return new Date().toISOString().slice(0, 10);
+        }
+
+        const vars = this.settings.text_variables ?? {};
+        if (Object.hasOwn(vars, name)) {
+            return vars[name];
+        }
+
+        return undefined;
+    }
+
     public async download(name: string) {
         if (this.#pages_by_path.has(name)) {
             name = this.#pages_by_path.get(name)!.filename;
@@ -376,6 +459,8 @@ export class ProjectPage {
         public sheet_path: string,
         public name?: string,
         public page?: string,
+        /** The sheet symbol (in the parent schematic) for this page, if any */
+        public sheet?: SchematicSheet,
     ) {}
 
     /**

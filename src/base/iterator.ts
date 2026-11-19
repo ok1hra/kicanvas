@@ -35,3 +35,14 @@ export function length(iterable: Iterable<unknown>) {
     }
     return n;
 }
+
+export function* filter<T>(
+    iterable: Iterable<T>,
+    predicate: (value: T) => boolean,
+): Generator<T, any, undefined> {
+    for (const i of iterable) {
+        if (predicate(i)) {
+            yield i;
+        }
+    }
+}

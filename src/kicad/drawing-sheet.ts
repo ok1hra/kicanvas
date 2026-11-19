@@ -109,8 +109,19 @@ export class DrawingSheet {
         switch (name) {
             case "PAPER":
                 return this.paper?.size || "";
-            // TODO: Mock values for now, should be provided by the project
-            // when that's implemented.
+            case "KICAD_VERSION":
+                // KiCad Version
+                return "KiCanvas Alpha";
+        }
+
+        const value = this.document?.resolve_text_var(name);
+        if (value !== undefined) {
+            return value;
+        }
+
+        // Defaults for documents that aren't part of a project hierarchy
+        // (boards and standalone schematics).
+        switch (name) {
             case "#":
                 // Sheet number
                 return "1";
@@ -120,11 +131,8 @@ export class DrawingSheet {
             case "SHEETPATH":
                 // Sheet path (hierarchical path)
                 return "/";
-            case "KICAD_VERSION":
-                // KiCad Version
-                return "KiCanvas Alpha";
         }
-        return this.document?.resolve_text_var(name);
+        return undefined;
     }
 }
 
