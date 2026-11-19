@@ -125,8 +125,17 @@ const content_types = {
     ".json": "application/json",
 };
 
+let project_url = "/";
+
 const server = http.createServer((req, res) => {
-    const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
+    const request_url = new URL(req.url, "http://x");
+    const path = decodeURIComponent(request_url.pathname);
+
+    // The bare address opens the project.
+    if (path == "/" && !request_url.search) {
+        res.writeHead(302, { Location: project_url });
+        return res.end();
+    }
     const send = (body, type) => {
         res.writeHead(200, {
             "Content-Type": type ?? "application/octet-stream",
@@ -195,7 +204,8 @@ for (let attempt = 0; ; attempt++) {
 const query = files
     .map((f) => `src=${encodeURIComponent(`project/${f}`)}`)
     .join("&");
-const url = `http://127.0.0.1:${port}/?${query}`;
+project_url = `/?${query}`;
+const url = `http://127.0.0.1:${port}/`;
 
 console.log(
     `\nKiCanvas is running with ${basename(project_dir)}:\n\n  ${url}\n`,
