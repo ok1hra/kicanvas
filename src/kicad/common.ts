@@ -452,16 +452,20 @@ export class Net {
     name: string;
 
     constructor(expr: Parseable) {
-        // (net 2 "+3V3")
-        Object.assign(
-            this,
-            parse_expr(
-                expr,
-                P.start("net"),
-                P.positional("number", T.number),
-                P.positional("name", T.string),
-            ),
+        // (net 2 "+3V3"), or since KiCad 10 just (net "+3V3")
+        const parsed = parse_expr(
+            expr,
+            P.start("net"),
+            P.positional("number", T.any),
+            P.positional("name", T.string),
         );
+
+        if (typeof parsed["number"] == "string" && !parsed["name"]) {
+            parsed["name"] = parsed["number"];
+            delete parsed["number"];
+        }
+
+        Object.assign(this, parsed);
     }
 }
 
