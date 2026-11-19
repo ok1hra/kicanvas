@@ -2,7 +2,7 @@
 
 <!-- load kicanvas -->
 
-<script type="module" src="/kicanvas/kicanvas.js"></script>
+<script type="module" src="../kicanvas/kicanvas.js"></script>
 
 !!! warning "Work in progress"
 
@@ -14,7 +14,7 @@ The `<kicanvas-embed>` HTML element embeds one or more KiCad documents onto the 
 <kicanvas-embed src="my-schematic.kicad_sch"></kicanvas-embed>
 ```
 
-<kicanvas-embed src="/examples/simple.kicad_sch"></kicanvas-embed>
+<kicanvas-embed src="../examples/simple.kicad_sch"></kicanvas-embed>
 
 The above example shows the most basic usage of the `<kicanvas-embed>` element. It's usage is intentionally similar to the [`<video>`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/video) and [`<img>`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/img) elements. Through the use of additional [attributes](#attributes) you can control how the document is displayed, control interactivity, and load multiple files.
 
@@ -40,7 +40,7 @@ This example embeds a single document and enables only basic controls- such as p
 <kicanvas-embed src="my-schematic.kicad_sch" controls="basic"> </kicanvas-embed>
 ```
 
-<kicanvas-embed src="/examples/simple.kicad_sch" controls="basic"></kicanvas-embed>
+<kicanvas-embed src="../examples/simple.kicad_sch" controls="basic"></kicanvas-embed>
 
 Using `controls="full"`, the viewer gains the sidebar and info panels:
 
@@ -48,7 +48,7 @@ Using `controls="full"`, the viewer gains the sidebar and info panels:
 <kicanvas-embed src="my-schematic.kicad_sch" controls="full"> </kicanvas-embed>
 ```
 
-<kicanvas-embed src="/examples/simple.kicad_sch" controls="full"></kicanvas-embed>
+<kicanvas-embed src="../examples/simple.kicad_sch" controls="full"></kicanvas-embed>
 
 You can disable specific controls and panels using `controlslist`. This example hides the download button:
 
@@ -60,7 +60,7 @@ You can disable specific controls and panels using `controlslist`. This example 
 </kicanvas-embed>
 ```
 
-<kicanvas-embed src="/examples/simple.kicad_sch" controls="basic" controlslist="nodownload"></kicanvas-embed>
+<kicanvas-embed src="../examples/simple.kicad_sch" controls="basic" controlslist="nodownload"></kicanvas-embed>
 
 ### Deep linking
 
@@ -91,8 +91,8 @@ This example shows how to use `<kicanvas-source>` to load multiple files.
 ```
 
 <kicanvas-embed controls="full">
-    <kicanvas-source src="/examples/simple.kicad_sch"></kicanvas-source>
-    <kicanvas-source src="/examples/starfish.kicad_pcb"></kicanvas-source>
+    <kicanvas-source src="../examples/simple.kicad_sch"></kicanvas-source>
+    <kicanvas-source src="../examples/starfish.kicad_pcb"></kicanvas-source>
 </kicanvas-embed>
 
 You can switch between the displayed files using the project panel on the right side. Note that if the files are all part of the same project, then the root schematic will be shown by default. If they are unrelated, the first schematic will be shown.
@@ -119,7 +119,7 @@ This example shows how to use `<kicanvas-source>` along with inline KiCad data. 
 ```
 
 <kicanvas-embed controls="full">
-    <kicanvas-source src="/examples/simple.kicad_sch"></kicanvas-source>
+    <kicanvas-source src="../examples/simple.kicad_sch"></kicanvas-source>
     <kicanvas-source name="inline.kicad_sch">
         (kicad_sch (version 20230121) (generator eeschema) (uuid
         5d5ad125-5ef1-42a1-a410-a0c4ab262ca6) (paper "A4") (title_block (title
