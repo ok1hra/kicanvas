@@ -131,9 +131,16 @@ class KiCanvasShellElement extends KCUIElement {
         // Only load the first URL
         const url = urls[0];
 
+        // Files to load: the src attribute (space separated) and ?src=
+        // parameters, e.g. ?src=board.kicad_pcb&src=board.kicad_sch
+        const srcs = [
+            ...(this.src?.split(/\s+/).filter(Boolean) ?? []),
+            ...url_params.getAll("src"),
+        ];
+
         later(async () => {
-            if (this.src) {
-                const vfs = new FetchFileSystem([this.src]);
+            if (srcs.length) {
+                const vfs = new FetchFileSystem(srcs);
                 await this.setup_project(vfs);
                 return;
             }

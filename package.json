@@ -36,6 +36,7 @@
         "lint": "npm run lint:eslint && npm run lint:types && npm run lint:prettier",
         "format": "prettier . --write",
         "serve": "node scripts/serve.js",
+        "open": "node scripts/open.js",
         "render-check": "node scripts/render-check.js",
         "kicad-compare": "node scripts/kicad-compare.js",
         "build:no-check": "node scripts/build.js",
