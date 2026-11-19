@@ -190,6 +190,47 @@ export abstract class Viewer extends EventTarget {
         this.selected = item;
     }
 
+    /**
+     * Changes the selection without firing a select event, used when the
+     * selection is driven from elsewhere (e.g. cross-probing).
+     */
+    protected set_selected_quietly(bb: BBox | null) {
+        this.#quiet = true;
+        try {
+            this.selected = bb;
+        } finally {
+            this.#quiet = false;
+        }
+    }
+
+    #quiet = false;
+
+    /**
+     * Moves the camera so that the given box is in view, zooming out if it
+     * doesn't fit. Counts as the user moving the camera.
+     */
+    ensure_visible(bbox: BBox) {
+        const camera = this.viewport.camera;
+        const view = camera.bbox;
+        const target = bbox.grow(Math.max(bbox.w, bbox.h) * 0.25 + 1);
+
+        const inside =
+            target.x >= view.x &&
+            target.y >= view.y &&
+            target.x2 <= view.x2 &&
+            target.y2 <= view.y2;
+
+        if (!inside) {
+            if (target.w > view.w || target.h > view.h) {
+                camera.bbox = target;
+            } else {
+                camera.center.set(target.center);
+            }
+            this.viewport.user_moved_camera = true;
+            this.draw();
+        }
+    }
+
     public get selected(): BBox | null {
         return this.#selected;
     }
@@ -204,12 +245,14 @@ export abstract class Viewer extends EventTarget {
         this.#selected = bb?.copy() || null;
 
         // Notify event listeners
-        this.dispatchEvent(
-            new KiCanvasSelectEvent({
-                item: this.#selected?.context,
-                previous: previous?.context,
-            }),
-        );
+        if (!this.#quiet) {
+            this.dispatchEvent(
+                new KiCanvasSelectEvent({
+                    item: this.#selected?.context,
+                    previous: previous?.context,
+                }),
+            );
+        }
 
         later(() => this.paint_selected());
     }

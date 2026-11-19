@@ -167,6 +167,12 @@ export class KicadSch {
         path ??= ``;
         this.sheet_path = path;
 
+        // KiCad 6 stored instance data in the root schematic, using paths
+        // without the root schematic's UUID.
+        const legacy_path = path.split("/").slice(2).join("/");
+        const legacy = (uuid: string) =>
+            legacy_path ? `/${legacy_path}/${uuid}` : `/${uuid}`;
+
         const root_symbol_instances = (
             this.project?.root_schematic_page?.document as KicadSch
         )?.symbol_instances;
@@ -177,7 +183,8 @@ export class KicadSch {
             const instance_data =
                 root_symbol_instances?.get(symbol_path) ??
                 global_symbol_instances?.get(symbol_path) ??
-                s.instances.get(path);
+                s.instances.get(path) ??
+                root_symbol_instances?.get(legacy(s.uuid));
 
             if (!instance_data) {
                 continue;
@@ -200,7 +207,8 @@ export class KicadSch {
             const instance_data =
                 root_sheet_instances?.get(sheet_path) ??
                 global_sheet_instances?.get(sheet_path) ??
-                s.instances.get(path);
+                s.instances.get(path) ??
+                root_sheet_instances?.get(legacy(s.uuid));
 
             if (!instance_data) {
                 continue;

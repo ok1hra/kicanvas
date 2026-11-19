@@ -107,7 +107,14 @@ suite("workspace: kc-ui elements", function () {
         document.body.append(section);
 
         try {
-            await new Promise((r) => window.requestAnimationFrame(r));
+            // Wait for the first render. (Not requestAnimationFrame, which
+            // doesn't run in background tabs.)
+            for (let i = 0; i < 100; i++) {
+                if (section.shadowRoot?.querySelector(".head")) {
+                    break;
+                }
+                await new Promise((r) => setTimeout(r, 10));
+            }
             assert.isFalse(section.open);
 
             const head = section.shadowRoot!.querySelector(

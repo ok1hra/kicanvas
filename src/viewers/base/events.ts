@@ -44,6 +44,23 @@ export class KiCanvasMouseMoveEvent extends KiCanvasEvent<MouseMoveDetails> {
     }
 }
 
+export type NetSelectDetails = {
+    /**
+     * The selected net, or null when the selection was cleared. The
+     * schematic viewer uses SheetNet objects, the board viewer net names.
+     */
+    net: unknown;
+};
+
+/** The user selected a net, e.g. by clicking a wire or a track. */
+export class KiCanvasNetSelectEvent extends KiCanvasEvent<NetSelectDetails> {
+    static readonly type = "kicanvas:net-select";
+
+    constructor(detail: NetSelectDetails) {
+        super(KiCanvasNetSelectEvent.type, detail);
+    }
+}
+
 /** Layer visibility, highlighting or zone fill display changed. */
 export class KiCanvasLayersChangedEvent extends KiCanvasEvent<null> {
     static readonly type = "kicanvas:layers-changed";
@@ -60,6 +77,7 @@ export interface KiCanvasEventMap {
     [KiCanvasSelectEvent.type]: KiCanvasSelectEvent;
     [KiCanvasMouseMoveEvent.type]: KiCanvasMouseMoveEvent;
     [KiCanvasLayersChangedEvent.type]: KiCanvasLayersChangedEvent;
+    [KiCanvasNetSelectEvent.type]: KiCanvasNetSelectEvent;
 }
 
 declare global {

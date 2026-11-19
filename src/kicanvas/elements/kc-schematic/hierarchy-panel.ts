@@ -8,6 +8,7 @@ import { delegate } from "../../../base/events";
 import { css, html } from "../../../base/web-components";
 import { KCUIElement } from "../../../kc-ui";
 import type { Project, ProjectPage } from "../../project";
+import { CrossProbe } from "../../cross-probe";
 import { KCViewerAppElement } from "../common/app";
 
 type Node = { page: ProjectPage; children: Node[] };
@@ -103,6 +104,18 @@ export class KCSchematicHierarchyPanelElement extends KCUIElement {
                 color: inherit;
             }
 
+            /* Sheets with the net or part selected for cross-probing */
+            .row.probed .name::after {
+                content: "";
+                display: inline-block;
+                width: 6px;
+                height: 6px;
+                margin-left: 6px;
+                border-radius: 50%;
+                background: #ff9f1a;
+                vertical-align: middle;
+            }
+
             .label {
                 padding: 6px 6px 2px;
                 font-size: 11px;
@@ -135,6 +148,22 @@ export class KCSchematicHierarchyPanelElement extends KCUIElement {
             if (page) {
                 this.project.set_active_page(page);
             }
+        });
+
+        // Mark sheets with the cross-probed net or part.
+        const on_probe = (e: Event) => {
+            const paths = (e as CustomEvent<Set<string>>).detail;
+            for (const row of this.renderRoot.querySelectorAll(".row")) {
+                row.classList.toggle(
+                    "probed",
+                    paths.has(row.getAttribute("data-path") ?? ""),
+                );
+            }
+        };
+        window.addEventListener(CrossProbe.pages_event, on_probe);
+        this.addDisposable({
+            dispose: () =>
+                window.removeEventListener(CrossProbe.pages_event, on_probe),
         });
 
         // Follow whichever sheet the schematic app shows.

@@ -109,6 +109,60 @@ export class KicadPCB {
 
         // sort the array by net_number
         this.nets.sort((a, b) => a.number - b.number);
+
+        this.#resolve_nets();
+    }
+
+    #nets_by_name = new Map<string, Net>();
+
+    /**
+     * Makes sure every net has a number and every item refers to its net by
+     * number. KiCad 10 dropped the board's net table and refers to nets by
+     * name, older versions use numbers from the table.
+     */
+    #resolve_nets() {
+        for (const net of this.nets) {
+            if (net.name !== undefined) {
+                this.#nets_by_name.set(net.name, net);
+            }
+        }
+
+        const number_for = (name: string): number => {
+            let net = this.#nets_by_name.get(name);
+            if (!net) {
+                if (!this.nets.length && name != "") {
+                    number_for("");
+                }
+                net = new Net(["net", this.nets.length, name]);
+                this.nets.push(net);
+                this.#nets_by_name.set(name, net);
+            }
+            return net.number;
+        };
+
+        const resolve = (item: { net: unknown }) => {
+            if (typeof item.net == "string") {
+                item.net = number_for(item.net);
+            }
+        };
+
+        this.segments.forEach(resolve);
+        this.vias.forEach(resolve);
+        this.zones.forEach(resolve);
+
+        for (const fp of this.footprints) {
+            fp.zones.forEach(resolve);
+            for (const pad of fp.pads) {
+                if (pad.net && pad.net.number === undefined) {
+                    pad.net.number = number_for(pad.net.name ?? "");
+                }
+            }
+        }
+    }
+
+    /** Looks up a net by its name. */
+    net_by_name(name: string): Net | undefined {
+        return this.#nets_by_name.get(name);
     }
 
     *items() {
@@ -218,7 +272,8 @@ export class LineSegment implements HasUniqueID, HasNetInfo {
                 P.vec2("end"),
                 P.pair("width", T.number),
                 P.pair("layer", T.string),
-                P.pair("net", T.number),
+                // A number, or a name since KiCad 10. See resolve_nets().
+                P.pair("net", T.any),
                 P.atom("locked"),
                 P.pair("uuid", T.string),
                 P.pair("tstamp", T.string),
@@ -270,7 +325,8 @@ export class ArcSegment implements HasUniqueID, HasNetInfo {
                 P.vec2("end"),
                 P.pair("width", T.number),
                 P.pair("layer", T.string),
-                P.pair("net", T.number),
+                // A number, or a name since KiCad 10. See resolve_nets().
+                P.pair("net", T.any),
                 P.atom("locked"),
                 P.pair("tstamp", T.string),
                 P.pair("uuid", T.string),
@@ -315,7 +371,8 @@ export class Via implements HasUniqueID, HasNetInfo {
                 P.pair("size", T.number),
                 P.pair("drill", T.number),
                 P.list("layers", T.string),
-                P.pair("net", T.number),
+                // A number, or a name since KiCad 10. See resolve_nets().
+                P.pair("net", T.any),
                 P.atom("locked"),
                 P.atom("free"),
                 P.atom("remove_unused_layers"),
@@ -376,7 +433,8 @@ export class Zone implements HasUniqueID {
                 expr,
                 P.start("zone"),
                 P.atom("locked"),
-                P.pair("net", T.number),
+                // A number, or a name since KiCad 10. See resolve_nets().
+                P.pair("net", T.any),
                 P.pair("net_name", T.string),
                 P.pair("net_name", T.string),
                 P.pair("name", T.string),

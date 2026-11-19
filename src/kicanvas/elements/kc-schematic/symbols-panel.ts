@@ -54,8 +54,13 @@ export class KCSchematicSymbolsPanelElement extends KCUIElement {
         // selection changes.
         this.addDisposable(
             this.viewer.addEventListener(KiCanvasSelectEvent.type, () => {
+                // The menu doesn't exist while re-rendering for a new sheet.
+                if (!this.menu) {
+                    return;
+                }
                 updating_selected = true;
-                this.menu.selected = this.viewer.selected?.context.uuid ?? null;
+                this.menu.selected =
+                    this.viewer.selected?.context?.uuid ?? null;
                 updating_selected = false;
             }),
         );
