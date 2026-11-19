@@ -152,9 +152,29 @@ export class BoardViewer extends DocumentViewer<
         this.draw();
     }
 
+    /**
+     * Zooms to fit the board outline (Edge.Cuts). Falls back to the page if
+     * the board has no outline.
+     */
     zoom_to_board() {
-        const edge_cuts = this.layers.by_name(LayerNames.edge_cuts)!;
-        const board_bbox = edge_cuts.bbox;
-        this.viewport.camera.bbox = board_bbox.grow(board_bbox.w * 0.1);
+        const edge_cuts = this.layers.by_name(LayerNames.edge_cuts);
+        const board_bbox = edge_cuts?.bbox;
+
+        if (!board_bbox?.valid) {
+            this.zoom_to_page();
+            return;
+        }
+
+        this.viewport.camera.bbox = board_bbox.grow(
+            Math.max(board_bbox.w, board_bbox.h) * 0.05,
+        );
+        this.draw();
+    }
+
+    protected override zoom_to_initial_view() {
+        // Boards are frequently placed partially (or entirely) outside of the
+        // drawing sheet, so showing the board outline is more useful than
+        // showing the page.
+        this.zoom_to_board();
     }
 }

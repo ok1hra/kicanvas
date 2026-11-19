@@ -72,7 +72,7 @@ export abstract class DocumentViewer<
 
             // Position the camera and draw the scene.
             log.info("Positioning camera");
-            this.zoom_to_page();
+            this.zoom_to_initial_view();
 
             // Mark the viewer as loaded and notify event listeners
             this.resolve_loaded(true);
@@ -133,6 +133,15 @@ export abstract class DocumentViewer<
     public override zoom_to_page() {
         this.viewport.camera.bbox = this.drawing_sheet.page_bbox.grow(10);
         this.draw();
+    }
+
+    /**
+     * Positions the camera when a document is first loaded. Defaults to
+     * showing the whole page; subclasses can override this to show something
+     * more relevant (e.g. the board outline).
+     */
+    protected zoom_to_initial_view() {
+        this.zoom_to_page();
     }
 
     public override draw(): void {
