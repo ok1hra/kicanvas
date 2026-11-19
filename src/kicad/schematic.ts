@@ -151,11 +151,19 @@ export class KicadSch {
         this.update_hierarchical_data();
     }
 
+    /**
+     * The hierarchical sheet path this schematic is currently being shown
+     * as. A schematic file can be used by several sheets, so things like
+     * ${SHEETNAME} depend on which instance is shown.
+     */
+    sheet_path = ``;
+
     update_hierarchical_data(path?: string) {
         // Assigns SchematicSymbol properties based on data in symbol_instances,
         // used for differing values in hierarchical sheet instances.
         // See SCH_SHEET_LIST::UpdateSymbolInstanceData
         path ??= ``;
+        this.sheet_path = path;
 
         const root_symbol_instances = (
             this.project?.root_schematic_page?.document as KicadSch
@@ -246,9 +254,70 @@ export class KicadSch {
         return null;
     }
 
+    /** The project page for the sheet instance currently being shown. */
+    get current_page() {
+        if (!this.project) {
+            return undefined;
+        }
+        return this.sheet_path
+            ? this.project.page_by_sheet_path(this.sheet_path)
+            : this.project.root_schematic_page?.document === this
+              ? this.project.root_schematic_page
+              : undefined;
+    }
+
+    /**
+     * Resolves text variables like KiCad does for schematic items: first
+     * sheet-specific values (SCH_SHEET::ResolveTextVar), then schematic-wide
+     * ones (SCHEMATIC::ResolveTextVar), the title block, and finally
+     * project-level variables.
+     */
     resolve_text_var(name: string): string | undefined {
-        if (name == "FILENAME") {
-            return this.filename;
+        const page = this.current_page;
+
+        switch (name) {
+            case "#":
+                if (page?.page) {
+                    return page.page;
+                }
+                break;
+            case "##":
+                if (this.project?.sheet_count) {
+                    return `${this.project.sheet_count}`;
+                }
+                break;
+            case "SHEETPATH":
+                if (page && this.project) {
+                    return this.project.human_sheet_path(page.sheet_path);
+                }
+                break;
+            case "SHEETNAME":
+                if (page?.sheet) {
+                    return page.sheet.sheetname ?? "";
+                }
+                if (page) {
+                    // The root sheet isn't named in the schematic, but the
+                    // project file may have a name for it.
+                    const uuid = page.sheet_path.split("/").at(-1);
+                    const named = this.project?.settings.sheets.find(
+                        ([sheet_uuid]) => sheet_uuid == uuid,
+                    );
+                    return named?.[1] ?? "";
+                }
+                break;
+            case "FILENAME":
+            case "FILEPATH":
+                return this.filename;
+        }
+
+        // Fields defined on the sheet symbol for this sheet instance.
+        if (page?.sheet) {
+            const upper_name = name.toUpperCase();
+            for (const prop of page.sheet.properties.values()) {
+                if (prop.name.toUpperCase() == upper_name) {
+                    return prop.text;
+                }
+            }
         }
 
         // Cross-reference
@@ -261,7 +330,16 @@ export class KicadSch {
             }
         }
 
-        return this.title_block.resolve_text_var(name);
+        // Title block fields can themselves use project variables, like a
+        // revision of "${REVISION}". See TITLE_BLOCK::TextVarResolver.
+        const title_block_value = this.title_block.resolve_text_var(name);
+        if (title_block_value !== undefined) {
+            return this.project
+                ? expand_text_vars(title_block_value, this.project)
+                : title_block_value;
+        }
+
+        return this.project?.resolve_text_var(name);
     }
 }
 

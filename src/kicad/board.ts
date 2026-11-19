@@ -120,7 +120,7 @@ export class KicadPCB {
     }
 
     resolve_text_var(name: string): string | undefined {
-        if (name == "FILENAME") {
+        if (name == "FILENAME" || name == "FILEPATH") {
             return this.filename;
         }
 
@@ -128,7 +128,16 @@ export class KicadPCB {
             return this.properties.get(name)!.value;
         }
 
-        return this.title_block.resolve_text_var(name);
+        // Title block fields can themselves use project variables, like a
+        // revision of "${REVISION}". See TITLE_BLOCK::TextVarResolver.
+        const title_block_value = this.title_block.resolve_text_var(name);
+        if (title_block_value !== undefined) {
+            return this.project
+                ? expand_text_vars(title_block_value, this.project)
+                : title_block_value;
+        }
+
+        return this.project?.resolve_text_var(name);
     }
 
     get edge_cuts_bbox(): BBox {
