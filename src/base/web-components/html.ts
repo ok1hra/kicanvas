@@ -33,11 +33,19 @@ export function html(
     const template = document.createElement(`template`);
 
     template.innerHTML = prepare_template_html(strings, values);
-    let content = template.content;
 
-    content = document.importNode(content, true);
+    // Bind attribute values while the template's content is still inert.
+    // Once imported into the live document, elements act on their attributes
+    // immediately: <img src> or <use href> would fetch the placeholder URL
+    // and custom elements would see the placeholder in
+    // attributeChangedCallback.
+    apply_values_to_tree(template.content, values, "attributes");
 
-    apply_values_to_tree(content, values);
+    // Content values may be existing elements that must keep their identity,
+    // so they're inserted only after importing.
+    const content = document.importNode(template.content, true);
+
+    apply_values_to_tree(content, values, "content");
 
     if (content.childElementCount == 1) {
         return content.firstElementChild as HTMLElement;
@@ -94,12 +102,17 @@ function prepare_template_html(
 }
 
 /**
- * Walks through the given DOM tree and replaces placeholders with values.
+ * Walks through the given DOM tree and replaces placeholders with values,
+ * either in attributes or in text content.
  */
-function apply_values_to_tree(tree: DocumentFragment, values: unknown[]) {
+function apply_values_to_tree(
+    tree: DocumentFragment,
+    values: unknown[],
+    what: "attributes" | "content",
+) {
     const walker = document.createTreeWalker(
         tree,
-        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+        what == "attributes" ? NodeFilter.SHOW_ELEMENT : NodeFilter.SHOW_TEXT,
         null,
     );
     let node;
