@@ -14,8 +14,15 @@ import {
     Renderer,
 } from "../../graphics";
 import type { SchematicTheme } from "../../kicad";
+import { Stroke, type StrokeParams } from "../../kicad/common";
 import * as schematic_items from "../../kicad/schematic";
-import { LibText, SchField, SchText, StrokeFont } from "../../kicad/text";
+import {
+    EDAText,
+    LibText,
+    SchField,
+    SchText,
+    StrokeFont,
+} from "../../kicad/text";
 import { StrokePainter } from "../base/painter";
 import { LayerNames, LayerSet, ViewLayer } from "./layers";
 import { BaseSchematicPainter, SchematicItemPainter } from "./painters/base";
@@ -381,6 +388,230 @@ class TextPainter extends SchematicItemPainter {
     }
 }
 
+type TableStroke = { width: number; color: Color; params: StrokeParams };
+
+/**
+ * Paints schematic tables: cell fills, cell text and the border and
+ * separator lines. See SCH_TABLE::DrawBorders and SCH_TEXTBOX::GetDrawPos.
+ */
+class TablePainter extends SchematicItemPainter {
+    classes = [schematic_items.Table];
+
+    layers_for(item: schematic_items.Table) {
+        return [LayerNames.notes];
+    }
+
+    paint(layer: ViewLayer, table: schematic_items.Table) {
+        const cells = table.cells.filter((c) => !c.covered && c.at && c.size);
+
+        for (const cell of cells) {
+            this.#paint_cell_fill(cell);
+        }
+
+        this.#paint_borders(table);
+
+        for (const cell of cells) {
+            this.#paint_cell_text(cell);
+        }
+    }
+
+    #cell_bbox(cell: schematic_items.TableCell) {
+        const { x, y } = cell.at.position;
+        return BBox.from_corners(x, y, x + cell.size.x, y + cell.size.y);
+    }
+
+    #paint_cell_fill(cell: schematic_items.TableCell) {
+        if (cell.fill?.type != "color" || !cell.fill.color) {
+            return;
+        }
+        this.gfx.polygon(
+            Polygon.from_BBox(
+                this.#cell_bbox(cell),
+                this.dim_if_needed(cell.fill.color),
+            ),
+        );
+    }
+
+    #stroke_for(stroke?: Stroke): TableStroke {
+        const width = stroke?.width || this.gfx.state.stroke_width;
+        let color = this.theme.note;
+        if (stroke?.color && !stroke.color.is_transparent_black) {
+            color = stroke.color;
+        }
+        return {
+            width,
+            color: this.dim_if_needed(color),
+            params: {
+                stroke: stroke ?? Stroke.default_value(),
+                dashed_line_gap_ratio: 3,
+                dashed_line_dash_ratio: 12,
+            },
+        };
+    }
+
+    #line(pts: Vec2[], stroke: TableStroke): void {
+        StrokePainter.line(pts, stroke.width, stroke.params, (lines) =>
+            this.gfx.line(lines, stroke.width, stroke.color),
+        );
+    }
+
+    #paint_borders(table: schematic_items.Table) {
+        const rows = table.row_count;
+        const cols = table.column_count;
+        const first = table.cell(0, 0);
+
+        if (!first?.at || !first.size) {
+            return;
+        }
+
+        const separators = this.#stroke_for(table.separators.stroke);
+
+        if (table.separators.cols) {
+            for (let col = 0; col < cols - 1; col++) {
+                for (let row = 0; row < rows; row++) {
+                    const cell = table.cell(row, col);
+                    if (!cell?.at || !cell.size || cell.covered) continue;
+                    const bb = this.#cell_bbox(cell);
+                    // Don't draw separators through cells spanning columns.
+                    if (col + (cell.span[0] ?? 1) - 1 >= cols - 1) continue;
+                    this.#line(
+                        [new Vec2(bb.x2, bb.y), new Vec2(bb.x2, bb.y2)],
+                        separators,
+                    );
+                }
+            }
+        }
+
+        if (table.separators.rows) {
+            // The first row's separator is the header line, drawn below.
+            const start_row = table.border.header ? 1 : 0;
+            for (let row = start_row; row < rows - 1; row++) {
+                for (let col = 0; col < cols; col++) {
+                    const cell = table.cell(row, col);
+                    if (!cell?.at || !cell.size || cell.covered) continue;
+                    const bb = this.#cell_bbox(cell);
+                    if (row + (cell.span[1] ?? 1) - 1 >= rows - 1) continue;
+                    this.#line(
+                        [new Vec2(bb.x, bb.y2), new Vec2(bb.x2, bb.y2)],
+                        separators,
+                    );
+                }
+            }
+        }
+
+        const border = this.#stroke_for(table.border.stroke);
+        const last = table.cells.at(-1)!;
+        const outline = BBox.combine([
+            this.#cell_bbox(first),
+            ...table.cells
+                .filter((c) => c.at && c.size && !c.covered)
+                .map((c) => this.#cell_bbox(c)),
+            this.#cell_bbox(last),
+        ]);
+
+        if (table.border.header && rows > 1) {
+            const y = this.#cell_bbox(first).y2;
+            this.#line(
+                [new Vec2(outline.x, y), new Vec2(outline.x2, y)],
+                border,
+            );
+        }
+
+        if (table.border.external) {
+            this.#line(
+                [
+                    new Vec2(outline.x, outline.y),
+                    new Vec2(outline.x2, outline.y),
+                    new Vec2(outline.x2, outline.y2),
+                    new Vec2(outline.x, outline.y2),
+                    new Vec2(outline.x, outline.y),
+                ],
+                border,
+            );
+        }
+    }
+
+    #paint_cell_text(cell: schematic_items.TableCell) {
+        const shown = cell.shown_text;
+        if (cell.effects.hide || !shown) {
+            return;
+        }
+
+        const text = new EDAText(shown);
+        text.apply_effects(cell.effects);
+        text.text_angle = Angle.from_degrees(cell.at.rotation);
+
+        const bb = this.#cell_bbox(cell);
+        const [ml = 0, mt = 0, mr = 0, mb = 0] = cell.margins;
+        const pos = new Vec2(bb.x + ml, bb.y2 - mb);
+
+        // Same as SCH_TEXTBOX::GetDrawPos.
+        if (text.text_angle.is_vertical) {
+            switch (text.h_align) {
+                case "left":
+                    pos.y = bb.y2 - mb;
+                    break;
+                case "center":
+                    pos.y = (bb.y + bb.y2) / 2;
+                    break;
+                case "right":
+                    pos.y = bb.y + mt;
+                    break;
+            }
+            switch (text.v_align) {
+                case "top":
+                    pos.x = bb.x + ml;
+                    break;
+                case "center":
+                    pos.x = (bb.x + bb.x2) / 2;
+                    break;
+                case "bottom":
+                    pos.x = bb.x2 - mr;
+                    break;
+            }
+        } else {
+            switch (text.h_align) {
+                case "left":
+                    pos.x = bb.x + ml;
+                    break;
+                case "center":
+                    pos.x = (bb.x + bb.x2) / 2;
+                    break;
+                case "right":
+                    pos.x = bb.x2 - mr;
+                    break;
+            }
+            switch (text.v_align) {
+                case "top":
+                    pos.y = bb.y + mt;
+                    break;
+                case "center":
+                    pos.y = (bb.y + bb.y2) / 2;
+                    break;
+                case "bottom":
+                    pos.y = bb.y2 - mb;
+                    break;
+            }
+        }
+
+        text.text_pos = pos.multiply(10000);
+
+        const font_color = cell.effects.font.color;
+        text.attributes.color = this.dim_if_needed(
+            font_color.is_transparent_black ? this.theme.note : font_color,
+        );
+
+        this.gfx.state.push();
+        StrokeFont.default().draw(
+            this.gfx,
+            text.shown_text,
+            text.text_pos,
+            text.attributes,
+        );
+        this.gfx.state.pop();
+    }
+}
+
 class PropertyPainter extends SchematicItemPainter {
     classes = [schematic_items.Property];
 
@@ -657,6 +888,7 @@ export class SchematicPainter extends BaseSchematicPainter {
             new JunctionPainter(this, gfx),
             new NoConnectPainter(this, gfx),
             new TextPainter(this, gfx),
+            new TablePainter(this, gfx),
             new LibTextPainter(this, gfx),
             new PinPainter(this, gfx),
             new LibSymbolPainter(this, gfx),
