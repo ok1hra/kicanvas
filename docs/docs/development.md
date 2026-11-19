@@ -6,6 +6,25 @@ This page provides some technical background for those wishing to dig into KiCan
 
 Contributions are welcome! However, since KiCanvas is in a super early stage please file an issue before you start working on something so we can coordinate. Also, please read our [Code of Conduct].
 
+## Workflow
+
+- Make each change on its own branch off `main`.
+- Run `npm run serve` and open http://localhost:8001 to try changes; it rebuilds automatically.
+- Before committing, run `npm run lint && npm test` (the same checks CI runs).
+- When fixing or extending a parser, add a small file under `test/kicad/files/` that exercises it.
+- Check rendering against a real project with `npm run render-check` (below).
+
+### Checking rendering against a real project
+
+`npm run render-check` loads KiCad files into the standalone viewer in headless Chrome, takes a screenshot of every page, and reports browser errors and the file tokens the parser skipped:
+
+```sh
+npm run render-check -- path/to/project/ --out build/render-check
+npm run render-check -- path/to/project/ --pages "Board,Power,mcu.kicad_sch"
+```
+
+A directory argument loads the `.kicad_pro`, `.kicad_sch` and `.kicad_pcb` files directly inside it. The script exits with status 1 when loading fails or the browser reports an error, so it can also be used as a smoke test. It needs Chrome or Chromium; set `CHROME_PATH` or pass `--chrome` if it isn't found automatically. Run it with `--help` for all options.
+
 ## Technical overview
 
 KiCanvas is written in modern vanilla [TypeScript] and uses the [Canvas] element and [WebGL] for rendering. KiCanvas's user interface is built using [Web Components].
