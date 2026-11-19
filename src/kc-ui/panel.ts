@@ -49,7 +49,7 @@ export class KCUIPanelTitleElement extends KCUIElement {
                 width: 100%;
                 text-align: left;
                 padding: 0.2em 0.8em 0.2em 0.4em;
-                display: flex;
+                display: var(--panel-title-display, flex);
                 align-items: center;
                 background: var(--panel-title-bg);
                 color: var(--panel-title-fg);

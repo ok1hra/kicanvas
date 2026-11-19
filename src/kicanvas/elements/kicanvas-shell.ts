@@ -74,6 +74,14 @@ class KiCanvasShellElement extends KCUIElement {
     @attribute({ type: String })
     public src: string;
 
+    /** The loaded project has schematics (shown in the left pane). */
+    @attribute({ type: Boolean })
+    public has_schematic: boolean;
+
+    /** The loaded project has a board (shown in the right pane). */
+    @attribute({ type: Boolean })
+    public has_board: boolean;
+
     @query(`input[name="link"]`, true)
     public link_input: HTMLInputElement;
 
@@ -151,6 +159,8 @@ class KiCanvasShellElement extends KCUIElement {
         try {
             await vfs.setup();
             await this.project.load(vfs);
+            this.has_schematic = this.project.has_schematics;
+            this.has_board = this.project.has_boards;
             this.project.set_active_page(this.project.first_page);
             this.loaded = true;
         } catch (e) {
@@ -162,10 +172,10 @@ class KiCanvasShellElement extends KCUIElement {
 
     override render() {
         this.#schematic_app = html`
-            <kc-schematic-app controls="full"></kc-schematic-app>
+            <kc-schematic-app controls="floating"></kc-schematic-app>
         ` as KCSchematicAppElement;
         this.#board_app = html`
-            <kc-board-app controls="full"></kc-board-app>
+            <kc-board-app controls="floating"></kc-board-app>
         ` as KCBoardAppElement;
 
         return html`
@@ -241,7 +251,11 @@ class KiCanvasShellElement extends KCUIElement {
                         </a>
                     </p>
                 </section>
-                <main>${this.#schematic_app} ${this.#board_app}</main>
+                <main>
+                    <div class="pane left">${this.#schematic_app}</div>
+                    <kc-ui-divider storage-key="workspace"></kc-ui-divider>
+                    <div class="pane right">${this.#board_app}</div>
+                </main>
             </kc-ui-app>
         `;
     }

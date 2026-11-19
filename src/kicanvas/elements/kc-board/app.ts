@@ -6,6 +6,7 @@
 
 import { html } from "../../../base/web-components";
 import { KicadPCB } from "../../../kicad";
+import type { BoardViewer } from "../../../viewers/board/viewer";
 import type { ProjectPage } from "../../project";
 import { KCViewerAppElement } from "../common/app";
 import { KCBoardViewerElement } from "./viewer";
@@ -14,6 +15,7 @@ import { KCBoardViewerElement } from "./viewer";
 import "../common/help-panel";
 import "../common/preferences-panel";
 import "../common/viewer-bottom-toolbar";
+import "./appearance-panel";
 import "./footprints-panel";
 import "./info-panel";
 import "./layers-panel";
@@ -37,6 +39,49 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
 
     override can_load(src: ProjectPage): boolean {
         return src.document instanceof KicadPCB;
+    }
+
+    protected override initial_page() {
+        const active = this.project.active_page;
+        if (active && this.can_load(active)) {
+            return active;
+        }
+        return [...this.project.pages()].find((p) => this.can_load(p));
+    }
+
+    override async load(src: ProjectPage) {
+        await super.load(src);
+        if (this.floating && this.current_page == src) {
+            // Start with just copper and the board outline, which is what
+            // matters most when cross-checking against the schematic.
+            (this.viewer as BoardViewer).show_copper_layers_only();
+        }
+    }
+
+    protected override get menu_heading() {
+        return "Board";
+    }
+
+    protected override get menu_anchor(): "left" | "right" {
+        return "right";
+    }
+
+    protected override make_sections() {
+        return [
+            this.section(
+                "layers",
+                "Layers",
+                html`<kc-board-appearance-panel></kc-board-appearance-panel>`,
+                true,
+            ),
+            // The appearance panel replaces the old layers panel.
+            ...super
+                .make_sections()
+                .filter(
+                    (s) =>
+                        (s as HTMLElement).getAttribute?.("name") != "layers",
+                ),
+        ];
     }
 
     override make_viewer_element(): KCBoardViewerElement {
