@@ -73,6 +73,7 @@ export class SchematicViewer extends DocumentViewer<
         this.#highlighted_buses = buses;
         if (this.selected?.context instanceof SchematicSheet) {
             later(() => this.paint_selected());
+            this.notify_selection();
         } else {
             this.set_selected_quietly(null);
         }
@@ -167,6 +168,18 @@ export class SchematicViewer extends DocumentViewer<
                 return;
             }
         }
+    }
+
+    /** The selected item, or else the highlighted nets and buses. */
+    override selection_bbox(): BBox | null {
+        if (this.selected) {
+            return this.selected;
+        }
+        const boxes = [
+            ...this.#highlighted_nets.map((n) => n.bbox),
+            ...this.#highlighted_buses.map((b) => b.bbox),
+        ].filter((b) => b.valid);
+        return boxes.length ? BBox.combine(boxes) : null;
     }
 
     override select(
@@ -278,6 +291,7 @@ export class SchematicViewer extends DocumentViewer<
         this.#highlighted_nets = [];
         this.#highlighted_buses = [];
         this.bus_aliases = src.project.bus_aliases;
+        this.notify_selection();
 
         const doc = src.document as KicadSch;
         doc.update_hierarchical_data(src.sheet_path);
