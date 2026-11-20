@@ -11,6 +11,7 @@ Contributions are welcome! However, since KiCanvas is in a super early stage ple
 - Make each change on its own branch off `main`.
 - Run `npm run serve` and open http://localhost:8001 to try changes; it rebuilds automatically.
 - To look at a local project, run `npm run open -- path/to/project/`. It builds KiCanvas, serves it with the project's files on 127.0.0.1 and opens the browser with the project loaded. Without a `.kicad_pro` in the directory itself, the first subdirectory with one is used.
+- When the project directory is in a git clone, the **Compare** button (under the search box) compares two revisions from its history: parts and BOM, nets (followed by the pins they connect, so renames, splits and merges are recognized) and layout, shown highlighted in revision B, with A above B, B over A, or alternating. The local server reads the history with `git` (`/git/api/info`, `/git/api/commits`, `/git/api/files?rev=…`, `/git/rev/<rev>/<file>`; `WORKTREE` is the working copy), so comparing only works with `npm run open`, not on the published site.
 - Before committing, run `npm run lint && npm test` (the same checks CI runs).
 - When fixing or extending a parser, add a small file under `test/kicad/files/` that exercises it.
 - Check rendering against a real project with `npm run render-check` (below).

@@ -14,6 +14,7 @@ import {
     KicadSch,
     SchematicSheet,
     SchematicSymbol,
+    instance_for,
 } from "../kicad/schematic";
 import {
     KiCanvasLoadEvent,
@@ -45,7 +46,10 @@ export function footprint_path(page: ProjectPage, symbol: SchematicSymbol) {
  * doesn't depend on which instance of the sheet was last shown.
  */
 export function reference_in(page: ProjectPage, symbol: SchematicSymbol) {
-    return symbol.instances.get(page.sheet_path)?.reference ?? symbol.reference;
+    return (
+        instance_for(symbol.instances, page.sheet_path)?.reference ??
+        symbol.reference
+    );
 }
 
 /**
@@ -316,6 +320,7 @@ export class CrossProbeIndex {
 export class NetGroups {
     #ids = new Map<ProjectPage, Map<SheetNet, number>>();
     #keys: string[] = [];
+    #roots: number[] = [];
 
     static is_made_up(key: string) {
         return key.startsWith("#");
@@ -437,7 +442,8 @@ export class NetGroups {
         }
         for (const ref of refs) {
             const n = id(ref.page, ref.net);
-            this.#keys[n] = key_by_root.get(uf.find(n))!;
+            this.#roots[n] = uf.find(n);
+            this.#keys[n] = key_by_root.get(this.#roots[n]!)!;
         }
     }
 
@@ -476,6 +482,16 @@ export class NetGroups {
     key(page: ProjectPage, net: SheetNet): string | undefined {
         const n = this.#ids.get(page)?.get(net);
         return n === undefined ? undefined : this.#keys[n];
+    }
+
+    /**
+     * Identifies the group a net on a sheet instance is part of. Unlike
+     * key(), this doesn't depend on the board: two groups can have the
+     * same key if the board is out of sync with the schematic.
+     */
+    group(page: ProjectPage, net: SheetNet): number | undefined {
+        const n = this.#ids.get(page)?.get(net);
+        return n === undefined ? undefined : this.#roots[n];
     }
 }
 

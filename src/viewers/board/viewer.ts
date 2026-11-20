@@ -199,7 +199,9 @@ export class BoardViewer extends DocumentViewer<
             return;
         }
 
-        this.painter.paint_net(this.board, this.#highlighted_nets);
+        this.painter.paint_net(this.board, this.#highlighted_nets, () =>
+            this.paint_annotations(),
+        );
         // Draw the net on top of the dimmed board, like KiCad's net
         // highlighting.
         const graphics = this.layers.overlay.graphics;

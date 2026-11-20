@@ -11,10 +11,10 @@
     Run `npm run open -- --help` for usage.
 */
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import http from "node:http";
-import { basename, extname, join, resolve, sep } from "node:path";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { bundle } from "./bundle.js";
 import { KICAD_FILE } from "./lib/viewer-page.js";
@@ -115,6 +115,100 @@ const kicanvas_js = build.outputFiles.find((f) =>
     f.path.endsWith(".js"),
 ).contents;
 
+/*
+    Git history of the project, for comparing revisions. The project
+    directory is usually a git clone, or a directory in one.
+*/
+function git(...args) {
+    return execFileSync("git", ["-C", project_dir, ...args], {
+        encoding: "utf8",
+        maxBuffer: 256 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"],
+    });
+}
+
+let git_root = null;
+try {
+    git_root = git("rev-parse", "--show-toplevel").trim();
+} catch {
+    // Not in a git repository; comparing isn't available.
+}
+// The project's directory in the repository, e.g. "kicad" or "".
+const git_subdir = git_root
+    ? relative(git_root, project_dir).split(sep).join("/")
+    : "";
+const git_path = (name) => (git_subdir ? `${git_subdir}/${name}` : name);
+const WORKTREE = "WORKTREE";
+const is_rev = (rev) => rev == WORKTREE || /^[0-9a-f]{7,40}$/.test(rev);
+
+function git_info() {
+    if (!git_root) {
+        return { available: false };
+    }
+    const dirty = git("status", "--porcelain", "--", ".").trim().length > 0;
+    let branch = "";
+    try {
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").trim();
+    } catch {
+        // No commits yet.
+    }
+    return {
+        available: true,
+        repository: basename(git_root),
+        subdir: git_subdir,
+        branch,
+        dirty,
+    };
+}
+
+/** Commits that change the project's directory, newest first. */
+function git_commits(limit = 500) {
+    const out = git(
+        "log",
+        `-n${limit}`,
+        "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e",
+        "--",
+        ".",
+    );
+    return out
+        .split("\x1e")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+            const [sha, short, author, date, subject] = line.split("\x1f");
+            return { sha, short, author, date, subject };
+        });
+}
+
+/** KiCad files directly in the project's directory at a revision. */
+function git_files(rev) {
+    if (rev == WORKTREE) {
+        return kicad_files(project_dir);
+    }
+    // From the repository's root: ls-tree output is relative to the
+    // current directory.
+    const out = execFileSync(
+        "git",
+        ["-C", git_root, "ls-tree", "--name-only", `${rev}:${git_subdir}`],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    return out
+        .split("\n")
+        .filter((f) => KICAD_FILE.test(f))
+        .sort();
+}
+
+function git_file(rev, name) {
+    if (rev == WORKTREE) {
+        return readFileSync(join(project_dir, name));
+    }
+    return execFileSync(
+        "git",
+        ["-C", git_root, "show", `${rev}:${git_path(name)}`],
+        { maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
+    );
+}
+
 const debug_dir = resolve("debug");
 const content_types = {
     ".html": "text/html; charset=utf-8",
@@ -151,6 +245,36 @@ const server = http.createServer((req, res) => {
 
     if (path == "/kicanvas/kicanvas.js") {
         return send(kicanvas_js, content_types[".js"]);
+    }
+
+    // Git history, for comparing revisions.
+    if (path.startsWith("/git/")) {
+        try {
+            const json = (value) =>
+                send(JSON.stringify(value), content_types[".json"]);
+            if (path == "/git/api/info") {
+                return json(git_info());
+            }
+            if (git_root && path == "/git/api/commits") {
+                return json(git_commits());
+            }
+            const rev = request_url.searchParams.get("rev") ?? "";
+            if (git_root && path == "/git/api/files" && is_rev(rev)) {
+                return json(git_files(rev));
+            }
+            // /git/rev/<rev>/<name>
+            const m = /^\/git\/rev\/([^/]+)\/([^/]+)$/.exec(path);
+            if (git_root && m && is_rev(m[1]) && KICAD_FILE.test(m[2])) {
+                if (git_files(m[1]).includes(m[2])) {
+                    return send(git_file(m[1], m[2]), "text/plain");
+                }
+            }
+        } catch (e) {
+            res.writeHead(500);
+            return res.end(String(e.message ?? e));
+        }
+        res.writeHead(404);
+        return res.end("Not found");
     }
 
     // Only the project's KiCad files are served from the project.

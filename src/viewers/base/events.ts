@@ -77,6 +77,15 @@ export class KiCanvasActivateEvent extends KiCanvasEvent<{ item: unknown }> {
     }
 }
 
+/** The user panned or zoomed, or the viewer was resized. */
+export class KiCanvasViewportEvent extends KiCanvasEvent<null> {
+    static readonly type = "kicanvas:viewport";
+
+    constructor() {
+        super(KiCanvasViewportEvent.type, null);
+    }
+}
+
 /** Layer visibility, highlighting or zone fill display changed. */
 export class KiCanvasLayersChangedEvent extends KiCanvasEvent<null> {
     static readonly type = "kicanvas:layers-changed";
@@ -95,6 +104,7 @@ export interface KiCanvasEventMap {
     [KiCanvasLayersChangedEvent.type]: KiCanvasLayersChangedEvent;
     [KiCanvasNetSelectEvent.type]: KiCanvasNetSelectEvent;
     [KiCanvasActivateEvent.type]: KiCanvasActivateEvent;
+    [KiCanvasViewportEvent.type]: KiCanvasViewportEvent;
 }
 
 declare global {

@@ -234,6 +234,17 @@ main > .status .coords {
     display: none;
 }
 
+/* While comparing, the compare workspace covers the viewer; the viewer
+   stays loaded (and sized) below it. */
+:host([comparing]) main > .pane,
+:host([comparing]) main > kc-ui-divider {
+    visibility: hidden;
+}
+
+main > kc-compare-workspace[hidden] {
+    display: none;
+}
+
 /* The search box with the schematic's buttons on its left and the board's
    on its right, at the top of the divider. */
 main > .center-bar {
@@ -357,9 +368,22 @@ main > .center-bar .tools.right {
     justify-self: start;
 }
 
-main > .center-bar .tools[hidden],
-main > .center-bar .tools:empty {
+main > .center-bar .tools[hidden] {
     visibility: hidden;
+}
+
+/* Each group has the viewer's buttons and the compare workspace's. */
+main > .center-bar .tools .set {
+    display: contents;
+}
+
+:host([comparing]) main > .center-bar .tools .set.view,
+:host(:not([comparing])) main > .center-bar .tools .set.compare {
+    display: none;
+}
+
+:host([comparing]) main > .center-bar .tools[hidden] {
+    visibility: visible;
 }
 
 main > .center-bar kc-ui-button {

@@ -27,6 +27,10 @@ import { KCPartInfoElement } from "./common/part-info";
 import { KCSearchBoxElement } from "./common/search-box";
 import { build_search_items, type SearchItem } from "../search";
 import { decode_view, encode_view, type ViewState } from "../share";
+import {
+    KCCompareWorkspaceElement,
+    type CompareMode,
+} from "./compare/compare-workspace";
 import { KCUIDividerElement } from "../../kc-ui";
 import { GitHubFileSystem } from "../services/github-vfs";
 import { CodebergFileSystem } from "../services/codeberg-vfs";
@@ -140,9 +144,11 @@ class KiCanvasShellElement extends KCUIElement {
             return;
         }
         let x =
-            this.has_schematic && this.has_board && left
-                ? left.offsetWidth + 3
-                : main.clientWidth / 2;
+            this.#compare?.active && this.#compare.split_x
+                ? this.#compare.split_x + 3
+                : this.has_schematic && this.has_board && left
+                  ? left.offsetWidth + 3
+                  : main.clientWidth / 2;
         // Keep it in the window.
         const half = bar.offsetWidth / 2;
         x = Math.max(half + 4, Math.min(x, main.clientWidth - half - 4));
@@ -151,6 +157,12 @@ class KiCanvasShellElement extends KCUIElement {
 
     /** Shows a part or net picked in the search box in both views. */
     #on_search_pick(item: SearchItem) {
+        if (this.#compare?.active) {
+            if (item.kind == "part") {
+                this.#compare.show_part(item.reference);
+            }
+            return;
+        }
         const sv = this.project.has_schematics
             ? (this.#schematic_app.viewer as SchematicViewer)
             : undefined;
@@ -232,6 +244,9 @@ class KiCanvasShellElement extends KCUIElement {
 
     /** What's shown now, for a shared link. */
     #view_state(): ViewState {
+        if (this.#compare?.active) {
+            return { compare: this.#compare.state };
+        }
         const sv = this.#schematic_viewer();
         const bv = this.#board_viewer();
         const state: ViewState = {};
@@ -313,11 +328,62 @@ class KiCanvasShellElement extends KCUIElement {
 
     #share_timer = 0;
 
+    #compare?: KCCompareWorkspaceElement;
+
+    /** Switches between viewing and comparing revisions. */
+    async #toggle_compare(revisions?: {
+        a: string;
+        b: string;
+        mode?: CompareMode;
+    }) {
+        const button = this.renderRoot.querySelector<HTMLElement>(
+            "main .center-bar button[name=compare]",
+        )!;
+        const tools = (side: string) =>
+            this.renderRoot.querySelector(
+                `main .center-bar .tools.${side} .set.compare`,
+            )!;
+
+        if (this.#compare?.active) {
+            this.#compare.leave();
+            this.comparing = false;
+            button.removeAttribute("selected");
+            this.#position_bar();
+            this.#update_hint();
+            return;
+        }
+
+        if (!this.#compare) {
+            this.#compare =
+                html`<kc-compare-workspace></kc-compare-workspace>` as KCCompareWorkspaceElement;
+            this.renderRoot.querySelector("main")!.append(this.#compare);
+            // Both sets of buttons stay in the row; CSS shows one of them.
+            // (Moving the buttons around would render them again.)
+            tools("left").replaceChildren(...this.#compare.toolbar_left);
+            tools("right").replaceChildren(...this.#compare.toolbar_right);
+        }
+        this.#part_info.hide();
+        this.comparing = true;
+        button.setAttribute("selected", "");
+        window.requestAnimationFrame(() => this.#position_bar());
+        await this.#compare.enter(revisions);
+        this.#position_bar();
+    }
+
+    /** Comparing revisions (see #toggle_compare). */
+    @attribute({ type: Boolean })
+    public comparing: boolean;
+
     /** Shows the view from a shared link, see #share(). */
     async #restore_view(state: ViewState) {
         const sv = this.#schematic_viewer();
         const bv = this.#board_viewer();
         await Promise.all([sv?.loaded, bv?.loaded]);
+
+        if (state.compare) {
+            await this.#toggle_compare(state.compare);
+            return;
+        }
 
         // The sheet first, then the selection, then the zoom (which the
         // selection would change).
@@ -449,6 +515,9 @@ class KiCanvasShellElement extends KCUIElement {
             "main .center-bar button[name=share]",
         )!;
         share.addEventListener("click", () => this.#share());
+        this.renderRoot
+            .querySelector("main .center-bar button[name=compare]")!
+            .addEventListener("click", () => this.#toggle_compare());
 
         workspace.addEventListener(KCSearchBoxElement.focus_event, (e) => {
             const focused = (e as CustomEvent<boolean>).detail;
@@ -662,18 +731,24 @@ class KiCanvasShellElement extends KCUIElement {
 
         // The views' buttons go next to the search box: the schematic's on
         // its left, the board's on its right.
-        const tools = (side: string) =>
+        const group = (side: string) =>
             this.renderRoot.querySelector(`main .center-bar .tools.${side}`)!;
-        tools("left").replaceChildren(
-            ...(has_schematics ? this.#schematic_app.toolbar_buttons : []),
+        const fill = (side: string, buttons: readonly HTMLElement[]) => {
+            const set = group(side).querySelector(".set.view")!;
+            const same =
+                set.children.length == buttons.length &&
+                buttons.every((b, i) => set.children[i] == b);
+            if (!same) {
+                set.replaceChildren(...buttons);
+            }
+        };
+        fill("left", has_schematics ? this.#schematic_app.toolbar_buttons : []);
+        fill(
+            "right",
+            has_boards ? [...this.#board_app.toolbar_buttons].reverse() : [],
         );
-        tools("right").replaceChildren(
-            ...(has_boards
-                ? [...this.#board_app.toolbar_buttons].reverse()
-                : []),
-        );
-        tools("left").toggleAttribute("hidden", !has_schematics);
-        tools("right").toggleAttribute("hidden", !has_boards);
+        group("left").toggleAttribute("hidden", !has_schematics);
+        group("right").toggleAttribute("hidden", !has_boards);
         this.#position_bar();
         window.requestAnimationFrame(() => this.#position_bar());
 
@@ -859,7 +934,10 @@ class KiCanvasShellElement extends KCUIElement {
                     <div class="pane right">${this.#board_app}</div>
                     ${this.#part_info}
                     <div class="center-bar">
-                        <div class="tools left"></div>
+                        <div class="tools left">
+                            <span class="set view"></span>
+                            <span class="set compare"></span>
+                        </div>
                         <div class="middle">
                             ${this.#search}
                             <div class="actions">
@@ -871,13 +949,24 @@ class KiCanvasShellElement extends KCUIElement {
                                     <kc-ui-icon>share</kc-ui-icon>
                                     Share
                                 </button>
+                                <button
+                                    type="button"
+                                    class="pill"
+                                    name="compare"
+                                    title="Compare two revisions from the project's git history (click again to go back)">
+                                    <kc-ui-icon>compare_arrows</kc-ui-icon>
+                                    Compare
+                                </button>
                             </div>
                             <div class="share-popup" hidden>
                                 <span class="msg"></span>
                                 <input type="text" readonly />
                             </div>
                         </div>
-                        <div class="tools right"></div>
+                        <div class="tools right">
+                            <span class="set view"></span>
+                            <span class="set compare"></span>
+                        </div>
                     </div>
                     <div class="status" role="status">
                         <span class="hint"></span>

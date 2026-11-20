@@ -237,6 +237,8 @@ export class SchematicViewer extends DocumentViewer<
             }
         }
 
+        this.paint_annotations();
+
         // A selected sheet symbol stays selected.
         const selected = this.selected;
         if (selected) {

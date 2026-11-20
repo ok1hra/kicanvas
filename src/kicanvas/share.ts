@@ -5,6 +5,9 @@
 */
 
 import { BBox } from "../base/math";
+import type { CompareMode } from "./elements/compare/compare-workspace";
+
+const compare_modes = ["highlight", "stacked", "overlay", "blink"];
 
 /**
  * What a shared link shows: the schematic sheet, the visible area of both
@@ -23,6 +26,8 @@ export type ViewState = {
     part?: string;
     /** Highlighted nets, by name (see CrossProbeIndex.net_key) */
     nets?: string[];
+    /** Comparing two revisions (by commit SHA, or "WORKTREE") */
+    compare?: { a: string; b: string; mode?: CompareMode };
 };
 
 function encode_bbox(bb: BBox) {
@@ -58,6 +63,12 @@ export function encode_view(state: ViewState): string {
     if (state.part) {
         params.set("part", state.part);
     }
+    if (state.compare) {
+        params.set("compare", `${state.compare.a}..${state.compare.b}`);
+        if (state.compare.mode) {
+            params.set("mode", state.compare.mode);
+        }
+    }
     // Net names can contain commas, so each gets its own parameter.
     for (const net of state.nets ?? []) {
         params.append("net", net);
@@ -76,12 +87,24 @@ export function decode_view(hash: string): ViewState | null {
         part: params.get("part") ?? undefined,
         nets: params.getAll("net"),
     };
+    const compare = /^([\w]+)\.\.([\w]+)$/.exec(params.get("compare") ?? "");
+    if (compare) {
+        const mode = params.get("mode") ?? "";
+        state.compare = {
+            a: compare[1]!,
+            b: compare[2]!,
+            mode: compare_modes.includes(mode)
+                ? (mode as CompareMode)
+                : undefined,
+        };
+    }
     const empty =
         !state.sheet &&
         !state.sch &&
         !state.board &&
         !state.flip &&
         !state.part &&
-        !state.nets!.length;
+        !state.nets!.length &&
+        !state.compare;
     return empty ? null : state;
 }
