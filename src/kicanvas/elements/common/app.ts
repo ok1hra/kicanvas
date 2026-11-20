@@ -19,7 +19,11 @@ import {
     KCUIElement,
     KCUIFloatingPanelElement,
 } from "../../../kc-ui";
-import { KiCanvasSelectEvent } from "../../../viewers/base/events";
+import {
+    KiCanvasLoadEvent,
+    KiCanvasSelectEvent,
+    KiCanvasSelectionEvent,
+} from "../../../viewers/base/events";
 import type { Viewer } from "../../../viewers/base/viewer";
 import type { Project, ProjectPage } from "../../project";
 import { KCBoardViewerElement } from "../kc-board/viewer";
@@ -129,6 +133,26 @@ export abstract class KCViewerAppElement<
             }),
         );
 
+        // "Fit to design" becomes "fit to selection" while something is
+        // selected or highlighted.
+        const fit = this.button("zoom_to_fit");
+        if (fit) {
+            const update = () => {
+                const selection = !!this.viewer.selection_bbox()?.valid;
+                fit.icon = selection ? "filter_center_focus" : "fit_screen";
+                fit.title = selection ? "Fit to selection" : "Fit to design";
+            };
+            this.addDisposable(
+                this.viewer.addEventListener(
+                    KiCanvasSelectionEvent.type,
+                    update,
+                ),
+            );
+            this.addDisposable(
+                this.viewer.addEventListener(KiCanvasLoadEvent.type, update),
+            );
+        }
+
         // Handle item selection in the viewers.
         this.addDisposable(
             this.viewer.addEventListener(KiCanvasSelectEvent.type, (e) => {
@@ -217,9 +241,15 @@ export abstract class KCViewerAppElement<
             button.addEventListener("click", (e) => {
                 e.preventDefault();
                 if (button.name == "zoom_to_fit") {
-                    (
-                        this.viewer as Viewer & { zoom_to_fit(): void }
-                    ).zoom_to_fit();
+                    // Fit to the selection if there is one.
+                    const bbox = this.viewer.selection_bbox();
+                    if (bbox?.valid) {
+                        this.viewer.zoom_to_item(bbox);
+                    } else {
+                        (
+                            this.viewer as Viewer & { zoom_to_fit(): void }
+                        ).zoom_to_fit();
+                    }
                 } else if (button.name == "flip_view") {
                     this.viewer.flip_view();
                     button.selected = !button.selected;

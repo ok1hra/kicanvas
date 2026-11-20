@@ -86,6 +86,18 @@ export class KiCanvasViewportEvent extends KiCanvasEvent<null> {
     }
 }
 
+/**
+ * What's selected or highlighted changed, also when that wasn't done by the
+ * user (e.g. by cross-probing). See Viewer.selection_bbox().
+ */
+export class KiCanvasSelectionEvent extends KiCanvasEvent<null> {
+    static readonly type = "kicanvas:selection";
+
+    constructor() {
+        super(KiCanvasSelectionEvent.type, null);
+    }
+}
+
 /** Layer visibility, highlighting or zone fill display changed. */
 export class KiCanvasLayersChangedEvent extends KiCanvasEvent<null> {
     static readonly type = "kicanvas:layers-changed";
@@ -105,6 +117,7 @@ export interface KiCanvasEventMap {
     [KiCanvasNetSelectEvent.type]: KiCanvasNetSelectEvent;
     [KiCanvasActivateEvent.type]: KiCanvasActivateEvent;
     [KiCanvasViewportEvent.type]: KiCanvasViewportEvent;
+    [KiCanvasSelectionEvent.type]: KiCanvasSelectionEvent;
 }
 
 declare global {

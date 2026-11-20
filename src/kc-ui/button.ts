@@ -160,7 +160,7 @@ export class KCUIButtonElement extends KCUIElement {
     @query("button", true)
     private button!: HTMLButtonElement;
 
-    @query("button_icon", true)
+    @query("kc-ui-icon", true)
     private button_icon!: KCUIIconElement;
 
     @attribute({ type: String })
@@ -195,7 +195,9 @@ export class KCUIButtonElement extends KCUIElement {
                 this.button.disabled = value == null ? false : true;
                 break;
             case "icon":
-                this.button_icon.innerText = value ?? "";
+                if (this.button_icon) {
+                    this.button_icon.innerText = value ?? "";
+                }
                 break;
         }
     }

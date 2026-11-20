@@ -556,6 +556,11 @@ export class KCCompareWorkspaceElement extends KCUIElement {
                 break;
             }
             case "zoom_to_fit":
+                // Fit to the selected change, if there is one.
+                if (this.#selected) {
+                    this.select_change(this.#selected);
+                    break;
+                }
                 this.#sch_b.viewer.zoom_to_fit();
                 this.#pcb_b.viewer.zoom_to_fit();
                 this.#copy_camera(this.#sch_b.viewer, this.#sch_a.viewer);
@@ -730,6 +735,7 @@ export class KCCompareWorkspaceElement extends KCUIElement {
     async #compare() {
         const token = ++this.#load_token;
         this.#selected = undefined;
+        this.#update_fit_button();
         this.#message(
             `Loading ${this.#short_label(this.#rev_a)} and ${this.#short_label(this.#rev_b)}…`,
         );
@@ -914,9 +920,21 @@ export class KCCompareWorkspaceElement extends KCUIElement {
         this.select_change(next);
     }
 
+    /** "Fit to design" fits to the selected change, if there is one. */
+    #update_fit_button() {
+        const fit = this.#toolbar_right.find((b) => b.name == "zoom_to_fit");
+        if (fit) {
+            fit.icon = this.#selected ? "filter_center_focus" : "fit_screen";
+            fit.title = this.#selected
+                ? "Fit to the selected change"
+                : "Fit to design";
+        }
+    }
+
     /** Selects a change and shows it in both views. */
     async select_change(change: Change | undefined, zoom = true) {
         this.#selected = change;
+        this.#update_fit_button();
         this.#render_changes();
         if (!change) {
             this.#update_marks();

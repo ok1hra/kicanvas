@@ -15,6 +15,7 @@ import {
     KiCanvasLoadEvent,
     KiCanvasMouseMoveEvent,
     KiCanvasSelectEvent,
+    KiCanvasSelectionEvent,
     KiCanvasViewportEvent,
     type KiCanvasEventMap,
 } from "./events";
@@ -357,6 +358,20 @@ export abstract class Viewer extends EventTarget {
         }
 
         later(() => this.paint_selected());
+        this.notify_selection();
+    }
+
+    /** Fires a KiCanvasSelectionEvent. */
+    protected notify_selection() {
+        this.dispatchEvent(new KiCanvasSelectionEvent());
+    }
+
+    /**
+     * Where what's selected or highlighted is, or null if nothing is. See
+     * "fit to selection".
+     */
+    selection_bbox(): BBox | null {
+        return this.selected;
     }
 
     public get selection_color() {

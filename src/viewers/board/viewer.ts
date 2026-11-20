@@ -136,6 +136,18 @@ export class BoardViewer extends DocumentViewer<
         return BBox.combine(boxes);
     }
 
+    /** The selected footprint, or else the highlighted nets. */
+    override selection_bbox(): BBox | null {
+        if (this.selected) {
+            return this.selected;
+        }
+        if (this.#highlighted_nets.length) {
+            const bbox = this.net_bbox(this.#highlighted_nets);
+            return bbox.valid ? bbox : null;
+        }
+        return null;
+    }
+
     override select(item: board_items.Footprint | string | BBox | null) {
         this.#highlighted_nets = [];
         // If item is a string, find the footprint by uuid or reference.
