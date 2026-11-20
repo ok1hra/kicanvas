@@ -26,6 +26,8 @@ export type ViewState = {
     part?: string;
     /** Highlighted nets, by name (see CrossProbeIndex.net_key) */
     nets?: string[];
+    /** The revision shown, if not the working copy (a commit's SHA) */
+    rev?: string;
     /** Comparing two revisions (by commit SHA, or "WORKTREE") */
     compare?: { a: string; b: string; mode?: CompareMode };
 };
@@ -63,6 +65,9 @@ export function encode_view(state: ViewState): string {
     if (state.part) {
         params.set("part", state.part);
     }
+    if (state.rev) {
+        params.set("rev", state.rev);
+    }
     if (state.compare) {
         params.set("compare", `${state.compare.a}..${state.compare.b}`);
         if (state.compare.mode) {
@@ -87,6 +92,10 @@ export function decode_view(hash: string): ViewState | null {
         part: params.get("part") ?? undefined,
         nets: params.getAll("net"),
     };
+    const rev = params.get("rev") ?? "";
+    if (/^[0-9a-f]{7,40}$/.test(rev)) {
+        state.rev = rev;
+    }
     const compare = /^([\w]+)\.\.([\w]+)$/.exec(params.get("compare") ?? "");
     if (compare) {
         const mode = params.get("mode") ?? "";
@@ -105,6 +114,7 @@ export function decode_view(hash: string): ViewState | null {
         !state.flip &&
         !state.part &&
         !state.nets!.length &&
-        !state.compare;
+        !state.compare &&
+        !state.rev;
     return empty ? null : state;
 }

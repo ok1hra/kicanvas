@@ -42,18 +42,30 @@ async function get_json<T>(url: string): Promise<T> {
     return (await response.json()) as T;
 }
 
-/** Whether git history is available, and about the repository. */
-export async function git_info(): Promise<GitInfo> {
-    try {
-        return await get_json<GitInfo>("git/api/info");
-    } catch {
-        return { available: false };
+let info_promise: Promise<GitInfo> | undefined;
+let commits_promise: Promise<Commit[]> | undefined;
+
+/**
+ * Whether git history is available, and about the repository.
+ *
+ * @param refresh - ask again, e.g. whether the working copy has changes
+ */
+export function git_info(refresh = false): Promise<GitInfo> {
+    if (!info_promise || refresh) {
+        info_promise = get_json<GitInfo>("git/api/info").catch(() => ({
+            available: false,
+        }));
     }
+    return info_promise;
 }
 
 /** Commits that change the project, newest first. */
-export function git_commits(): Promise<Commit[]> {
-    return get_json<Commit[]>("git/api/commits");
+export function git_commits(refresh = false): Promise<Commit[]> {
+    if (!commits_promise || refresh) {
+        commits_promise = get_json<Commit[]>("git/api/commits");
+        commits_promise.catch(() => (commits_promise = undefined));
+    }
+    return commits_promise;
 }
 
 /** The project's KiCad files at a revision. */
@@ -80,6 +92,21 @@ class RevisionFileSystem extends FileSystemBase {
     }
 }
 
+/** The project's files at a revision (a commit's SHA, or WORKTREE). */
+export async function revision_fs(rev: string) {
+    const names = await get_json<string[]>(
+        `git/api/files?rev=${encodeURIComponent(rev)}`,
+    );
+    // The project file first, so the project's settings are known.
+    names.sort(
+        (a, b) =>
+            Number(b.endsWith(".kicad_pro")) - Number(a.endsWith(".kicad_pro")),
+    );
+    const fs = new RevisionFileSystem(rev, names);
+    await fs.setup();
+    return fs;
+}
+
 const projects = new Map<string, Promise<Project>>();
 
 /** The project as it is at a revision (a commit's SHA, or WORKTREE). */
@@ -87,19 +114,8 @@ export function load_revision(rev: string): Promise<Project> {
     let project = projects.get(rev);
     if (!project) {
         project = (async () => {
-            const names = await get_json<string[]>(
-                `git/api/files?rev=${encodeURIComponent(rev)}`,
-            );
-            // The project file first, so the project's settings are known.
-            names.sort(
-                (a, b) =>
-                    Number(b.endsWith(".kicad_pro")) -
-                    Number(a.endsWith(".kicad_pro")),
-            );
-            const fs = new RevisionFileSystem(rev, names);
-            await fs.setup();
             const p = new Project();
-            await p.load(fs);
+            await p.load(await revision_fs(rev));
             return p;
         })();
         // Don't keep failures (or the working copy, which can change).

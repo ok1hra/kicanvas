@@ -319,6 +319,25 @@ suite("shared links", function () {
         assert.isNull(decode_view("#s=1,2,nope,4"));
         assert.equal(decode_view("#part=U5")!.part, "U5");
     });
+
+    test("the shown revision and compared revisions", function () {
+        const sha = "ffb1c5d9c7cb9e62a650291edf46a19e0204f7c7";
+        const state = decode_view(
+            `#${encode_view({ rev: sha, part: "L23" })}`,
+        )!;
+        assert.equal(state.rev, sha);
+        assert.equal(state.part, "L23");
+        assert.isUndefined(decode_view("#rev=../etc")?.rev);
+
+        const cmp = decode_view(
+            `#${encode_view({ compare: { a: "abc1234", b: "WORKTREE", mode: "overlay" } })}`,
+        )!;
+        assert.deepEqual(cmp.compare, {
+            a: "abc1234",
+            b: "WORKTREE",
+            mode: "overlay",
+        });
+    });
 });
 
 suite("sheet instances", function () {

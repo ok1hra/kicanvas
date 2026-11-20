@@ -245,6 +245,17 @@ main > kc-compare-workspace[hidden] {
     display: none;
 }
 
+/* The revision palette can go anywhere over both halves. */
+main > kc-ui-floating-panel.revision {
+    z-index: 27;
+    --floating-panel-width: 290px;
+}
+
+main > kc-ui-floating-panel.revision[hidden],
+:host([comparing]) main > kc-ui-floating-panel.revision {
+    display: none;
+}
+
 /* The search box with the schematic's buttons on its left and the board's
    on its right, at the top of the divider. */
 main > .center-bar {
@@ -328,6 +339,21 @@ main > .center-bar button.pill:hover {
 main > .center-bar button.pill[selected] {
     background: #2f5d8a;
     border-color: #4a86c5;
+    color: #fff;
+}
+
+main > .center-bar button.pill .done,
+main > .center-bar button.pill[copied] .label {
+    display: none;
+}
+
+main > .center-bar button.pill[copied] .done {
+    display: inline;
+}
+
+main > .center-bar button.pill[copied] {
+    background: #2e6b3a;
+    border-color: #4f9a5e;
     color: #fff;
 }
 
