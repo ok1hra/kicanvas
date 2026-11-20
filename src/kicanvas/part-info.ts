@@ -14,6 +14,23 @@ export type PartField = { name: string; value: string };
 /** Fields shown before "Show all", in this order. */
 export const key_fields = ["ID", "Datasheet", "part_value"];
 
+/** A row of the part info card: one value and the fields that have it. */
+export type PartRow = {
+    names: string[];
+    value: string | undefined;
+    key: boolean;
+};
+
+/**
+ * Whether two fields with this value are likely the same text repeated,
+ * e.g. a description copied into another field. Short values like "0" or
+ * "yes" are equal by coincidence.
+ */
+function is_text(value: string | undefined) {
+    const v = value?.trim() ?? "";
+    return v.length >= 6 && /\p{L}/u.test(v);
+}
+
 /** Link to a part in Factorify, by its ID field. */
 export function factorify_href(id: string | undefined): string | undefined {
     const v = id?.trim();
@@ -32,6 +49,39 @@ export class PartInfo {
         public value: string,
         public fields: PartField[],
     ) {}
+
+    /**
+     * The card's rows: the key fields first, then the other fields except
+     * the reference. Fields with the same value as an earlier row (e.g. a
+     * "req" field repeating the description) are merged into that row.
+     */
+    rows(): PartRow[] {
+        const rows: PartRow[] = key_fields.map((name) => ({
+            names: [name],
+            value: this.get(name),
+            key: true,
+        }));
+        const lower_keys = key_fields.map((k) => k.toLowerCase());
+
+        for (const f of this.fields) {
+            const lower = f.name.toLowerCase();
+            if (f.name == "Reference" || lower_keys.includes(lower)) {
+                continue;
+            }
+            const same = !is_text(f.value)
+                ? undefined
+                : rows.find(
+                      (r) =>
+                          is_text(r.value) && r.value!.trim() == f.value.trim(),
+                  );
+            if (same) {
+                same.names.push(f.name);
+            } else {
+                rows.push({ names: [f.name], value: f.value, key: false });
+            }
+        }
+        return rows;
+    }
 
     /** Looks up a field by name, ignoring case. */
     get(name: string): string | undefined {

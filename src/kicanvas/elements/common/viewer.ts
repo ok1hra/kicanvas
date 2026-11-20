@@ -11,6 +11,7 @@ import type { Viewer } from "../../../viewers/base/viewer";
 import { Preferences, WithPreferences } from "../../preferences";
 import type { ProjectPage } from "../../project";
 import themes from "../../themes";
+import { KCChooserElement } from "./chooser";
 
 /**
  * Basic element for wiring up a Viewer to the DOM.
@@ -34,6 +35,9 @@ export abstract class KCViewerElement<
     override initialContentCallback() {
         (async () => {
             this.viewer = this.addDisposable(this.make_viewer());
+            // Choosing between several things under the pointer.
+            this.viewer.chooser = (x, y, title, items, on_choose) =>
+                this.#chooser.show(x, y, title, items, on_choose);
 
             await this.viewer.setup();
 
@@ -79,8 +83,11 @@ export abstract class KCViewerElement<
         await this.viewer.load(src.document);
     }
 
+    #chooser: KCChooserElement;
+
     override render() {
         this.canvas = html`<canvas></canvas>` as HTMLCanvasElement;
+        this.#chooser = html`<kc-chooser></kc-chooser>` as KCChooserElement;
 
         return html`<style>
                 :host {
@@ -95,6 +102,6 @@ export abstract class KCViewerElement<
                     height: 100%;
                 }
             </style>
-            ${this.canvas}`;
+            ${this.canvas} ${this.#chooser}`;
     }
 }

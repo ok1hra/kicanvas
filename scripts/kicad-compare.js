@@ -478,6 +478,10 @@ async function prepare_capture(page, which) {
             }
         }
         kc.deep(document, "kc-part-info")?.hide();
+        for (const sel of ["main > .center-bar", "main > .status"]) {
+            const el = shell.shadowRoot.querySelector(sel);
+            if (el) el.style.display = "none";
+        }
     }, which);
 }
 

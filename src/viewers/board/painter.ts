@@ -37,9 +37,15 @@ abstract class BoardItemPainter extends ItemPainter {
         return this.view_painter.theme;
     }
 
-    /** Alias for BoardPainter.filter_net */
-    get filter_net(): number | null {
-        return (this.view_painter as BoardPainter).filter_net;
+    /** Whether only the nets in BoardPainter.filter_nets are painted. */
+    get filter_net(): boolean {
+        return (this.view_painter as BoardPainter).filter_nets !== null;
+    }
+
+    /** Whether an item on the given net is skipped while filtering. */
+    skip_net(net: number | undefined): boolean {
+        const nets = (this.view_painter as BoardPainter).filter_nets;
+        return nets !== null && (net === undefined || !nets.has(net));
     }
 
     protected isFillValid(fill: string): boolean {
@@ -253,7 +259,7 @@ class TraceSegmentPainter extends NetNameItemPainter {
     }
 
     paint(layer: ViewLayer, s: board_items.LineSegment) {
-        if (this.filter_net && s.net != this.filter_net) {
+        if (this.skip_net(s.net)) {
             return;
         }
 
@@ -270,7 +276,7 @@ class TraceArcPainter extends NetNameItemPainter {
     }
 
     paint(layer: ViewLayer, a: board_items.ArcSegment) {
-        if (this.filter_net && a.net != this.filter_net) {
+        if (this.skip_net(a.net)) {
             return;
         }
 
@@ -313,7 +319,7 @@ class ViaPainter extends NetNameItemPainter {
     }
 
     paint(layer: ViewLayer, v: board_items.Via) {
-        if (this.filter_net && v.net != this.filter_net) {
+        if (this.skip_net(v.net)) {
             return;
         }
 
@@ -384,7 +390,7 @@ class ZonePainter extends BoardItemPainter {
             return;
         }
 
-        if (this.filter_net && z.net != this.filter_net) {
+        if (this.skip_net(z.net)) {
             return;
         }
 
@@ -406,7 +412,7 @@ class ZonePainter extends BoardItemPainter {
             return;
         }
 
-        if (this.filter_net && z.net != this.filter_net) {
+        if (this.skip_net(z.net)) {
             return;
         }
 
@@ -475,7 +481,7 @@ class PadPainter extends NetNameItemPainter {
     }
 
     paint(layer: ViewLayer, pad: board_items.Pad) {
-        if (this.filter_net && pad.net?.number != this.filter_net) {
+        if (this.skip_net(pad.net?.number)) {
             return;
         }
 
@@ -1272,12 +1278,13 @@ export class BoardPainter extends DocumentPainter {
 
     // Used to filter out items by net when highlighting nets. Painters
     // should use this to determine whether to draw or skip the current item.
-    filter_net: number | null = null;
+    filter_nets: Set<number> | null = null;
 
-    paint_net(board: board_items.KicadPCB, net: number) {
+    /** Paints the given nets (by number) on the overlay layer. */
+    paint_net(board: board_items.KicadPCB, nets: number | number[]) {
         const layer = this.layers.overlay;
 
-        this.filter_net = net;
+        this.filter_nets = new Set(typeof nets == "number" ? [nets] : nets);
 
         layer.clear();
         layer.color = Color.white;
@@ -1295,6 +1302,6 @@ export class BoardPainter extends DocumentPainter {
 
         layer.graphics = this.gfx.end_layer();
         layer.graphics.composite_operation = "overlay";
-        this.filter_net = null;
+        this.filter_nets = null;
     }
 }

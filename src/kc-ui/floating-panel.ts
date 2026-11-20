@@ -70,7 +70,17 @@ function save_state(key: string | undefined, value: object) {
     }
 }
 
-type PanelState = { left: number; top: number; collapsed: boolean };
+/**
+ * Saved position: the distance from the left edge, or for panels anchored
+ * to the right, from the right edge, so they stay in their corner when the
+ * viewer is resized.
+ */
+type PanelState = {
+    left?: number;
+    right?: number;
+    top: number;
+    collapsed: boolean;
+};
 
 /**
  * kc-ui-floating-panel is a small, draggable menu that floats over a viewer.
@@ -163,16 +173,18 @@ export class KCUIFloatingPanelElement extends KCUIElement {
                 color: var(--fp-fg);
             }
 
+            /* Points up when open (collapse) and down when collapsed
+               (expand). */
             button .chevron {
                 width: 6px;
                 height: 6px;
                 border-right: 1.5px solid currentColor;
                 border-bottom: 1.5px solid currentColor;
-                transform: translateY(-1px) rotate(45deg);
+                transform: translateY(1px) rotate(-135deg);
             }
 
             :host([collapsed]) button .chevron {
-                transform: translateY(1px) rotate(-135deg);
+                transform: translateY(-1px) rotate(45deg);
             }
 
             .sections {
@@ -212,8 +224,12 @@ export class KCUIFloatingPanelElement extends KCUIElement {
 
     get #state_key() {
         return this.storage_key
-            ? `kc:floating-panel:${this.storage_key}`
+            ? `kc:floating-panel2:${this.storage_key}`
             : undefined;
+    }
+
+    get #right_anchored() {
+        return this.anchor == "right";
     }
 
     override connectedCallback() {
@@ -221,12 +237,17 @@ export class KCUIFloatingPanelElement extends KCUIElement {
 
         // Only the position is restored; whether the panel starts collapsed
         // is up to whoever creates it.
-        const state = load_state<PanelState>(this.#state_key);
-        if (state.left !== undefined && state.top !== undefined) {
+        const { top, left, right } = load_state<PanelState>(this.#state_key);
+        if (top !== undefined) {
             // Wait for layout so the parent's size is known.
-            window.requestAnimationFrame(() =>
-                this.move_to(state.left!, state.top!),
-            );
+            window.requestAnimationFrame(() => {
+                if (right !== undefined) {
+                    const width = this.#parent?.clientWidth ?? 0;
+                    this.move_to(width - this.offsetWidth - right, top);
+                } else if (left !== undefined) {
+                    this.move_to(left, top);
+                }
+            });
         }
     }
 
@@ -284,10 +305,10 @@ export class KCUIFloatingPanelElement extends KCUIElement {
         });
 
         // Keep the panel inside of its container when the container shrinks.
-        const parent = this.offsetParent ?? this.parentElement;
+        const parent = this.#parent;
         if (parent) {
             this.#resize_observer = new ResizeObserver(() => {
-                if (this.style.left) {
+                if (this.style.top) {
                     const { left, top } = this.#position();
                     this.move_to(left, top);
                 }
@@ -296,30 +317,51 @@ export class KCUIFloatingPanelElement extends KCUIElement {
         }
     }
 
+    get #parent() {
+        return (this.offsetParent ?? this.parentElement) as
+            | HTMLElement
+            | undefined;
+    }
+
     #position() {
         return { left: this.offsetLeft, top: this.offsetTop };
     }
 
-    /** Moves the panel, keeping it within its offset parent. */
+    /**
+     * Moves the panel, keeping it within its offset parent. Panels anchored
+     * to the right keep their distance from the right edge when the parent
+     * is resized.
+     */
     move_to(left: number, top: number) {
-        const parent = (this.offsetParent ?? this.parentElement) as
-            | HTMLElement
-            | undefined;
+        const parent = this.#parent;
+        const parent_width = parent?.clientWidth ?? 0;
         if (parent) {
-            const max_left = parent.clientWidth - this.offsetWidth;
+            const max_left = parent_width - this.offsetWidth;
             const max_top = parent.clientHeight - 24;
             left = Math.max(0, Math.min(left, max_left));
             top = Math.max(0, Math.min(top, max_top));
         }
-        this.style.left = `${left}px`;
         this.style.top = `${top}px`;
-        this.style.right = "auto";
+        if (this.#right_anchored && parent) {
+            this.style.right = `${parent_width - left - this.offsetWidth}px`;
+            this.style.left = "auto";
+        } else {
+            this.style.left = `${left}px`;
+            this.style.right = "auto";
+        }
     }
 
     #save() {
         const state: Partial<PanelState> = { collapsed: this.collapsed };
-        if (this.style.left) {
-            Object.assign(state, this.#position());
+        if (this.style.top) {
+            const { left, top } = this.#position();
+            state.top = top;
+            const parent = this.#parent;
+            if (this.#right_anchored && parent) {
+                state.right = parent.clientWidth - left - this.offsetWidth;
+            } else {
+                state.left = left;
+            }
         }
         save_state(this.#state_key, state);
     }

@@ -6,12 +6,7 @@
 
 import { attribute, css, html } from "../../../base/web-components";
 import { KCUIElement } from "../../../kc-ui";
-import {
-    datasheet_href,
-    factorify_href,
-    key_fields,
-    type PartInfo,
-} from "../../part-info";
+import { datasheet_href, factorify_href, type PartInfo } from "../../part-info";
 
 /**
  * A small card with a part's key metadata (ID, datasheet, part_value),
@@ -278,8 +273,14 @@ export class KCPartInfoElement extends KCUIElement {
         return html`<span class="val">${value}</span>`;
     }
 
-    #field(name: string, value: string | undefined, key = false) {
-        return html`<span class="name ${key ? "key" : ""}">${name}</span>
+    /** A row: `label` is shown, `name` decides how the value is linked. */
+    #field(
+        label: string,
+        value: string | undefined,
+        key = false,
+        name = label,
+    ) {
+        return html`<span class="name ${key ? "key" : ""}">${label}</span>
             ${this.#value(name, value)}`;
     }
 
@@ -289,21 +290,30 @@ export class KCPartInfoElement extends KCUIElement {
             return html``;
         }
 
-        const key_rows = key_fields.map((name) =>
-            this.#field(name, info.get(name), true),
-        );
-
+        // Merged rows list fields with the same value once, e.g. a "req"
+        // field that repeats the description.
+        const rows = info.rows();
+        const key_rows = rows
+            .filter((r) => r.key)
+            .map((r) =>
+                this.#field(
+                    this.expanded ? r.names.join(" / ") : r.names[0]!,
+                    r.value,
+                    true,
+                    r.names[0],
+                ),
+            );
         const other_rows = this.expanded
-            ? info.fields
-                  .filter(
-                      (f) =>
-                          // Already shown: in the header and the key rows.
-                          f.name != "Reference" &&
-                          !key_fields.some(
-                              (k) => k.toLowerCase() == f.name.toLowerCase(),
-                          ),
+            ? rows
+                  .filter((r) => !r.key)
+                  .map((r) =>
+                      this.#field(
+                          r.names.join(" / "),
+                          r.value,
+                          false,
+                          r.names[0],
+                      ),
                   )
-                  .map((f) => this.#field(f.name, f.value))
             : [];
 
         return html`<header>
@@ -321,9 +331,7 @@ export class KCPartInfoElement extends KCUIElement {
             </div>
             <footer>
                 <button class="toggle" type="button">
-                    ${this.expanded
-                        ? "Show less"
-                        : `Show all (${info.fields.length})`}
+                    ${this.expanded ? "Show less" : `Show all (${rows.length})`}
                 </button>
             </footer>`;
     }

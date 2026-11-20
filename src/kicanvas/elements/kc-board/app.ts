@@ -56,21 +56,18 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
     override async load(src: ProjectPage) {
         await super.load(src);
         if (this.floating && this.current_page == src) {
-            // Start with just copper and the board outline, which is what
-            // matters most when cross-checking against the schematic, and
-            // zone outlines instead of fills so the traces are visible.
+            // Start with copper, the board outline, silkscreen and
+            // courtyards, which is what matters most when cross-checking
+            // against the schematic, and zone outlines instead of fills so
+            // the traces are visible.
             const viewer = this.viewer as BoardViewer;
-            viewer.show_copper_layers_only();
+            viewer.show_default_layers();
             viewer.zone_fills = false;
         }
     }
 
     protected override get menu_heading() {
         return "Board";
-    }
-
-    protected override get show_coordinates() {
-        return true;
     }
 
     #measure?: KCBoardMeasureElement;
@@ -82,7 +79,7 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
         this.#measure.addEventListener(
             KCBoardMeasureElement.change_event,
             (e) => {
-                const button = this.#button("measure");
+                const button = this.button("measure");
                 if (button) {
                     button.selected = (e as CustomEvent<boolean>).detail;
                 }
@@ -91,36 +88,20 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
         return [this.#measure];
     }
 
-    protected override make_bottom_buttons() {
+    protected override make_toolbar_buttons() {
         return [
-            html`<kc-ui-button
-                slot="left"
-                variant="toolbar"
-                name="measure"
-                title="Measure distances and angles (M)"
-                icon="straighten">
-            </kc-ui-button>`,
-            html`<kc-ui-button
-                slot="right"
-                variant="toolbar"
-                name="zone_fills"
-                title="Zone fills"
-                icon="format_color_fill">
-            </kc-ui-button>`,
-            html`<kc-ui-button
-                slot="right"
-                variant="toolbar"
-                name="flip_view"
-                title="Flip board view"
-                icon="flip">
-            </kc-ui-button>`,
+            this.toolbar_button(
+                "measure",
+                "Measure distances and angles (M)",
+                "straighten",
+            ),
+            this.toolbar_button(
+                "zone_fills",
+                "Zone fills",
+                "format_color_fill",
+            ),
+            this.toolbar_button("flip_view", "Flip board view", "flip"),
         ];
-    }
-
-    #button(name: string) {
-        return this.renderRoot.querySelector(
-            `kc-ui-button[name="${name}"]`,
-        ) as KCUIButtonElement | null;
     }
 
     protected override on_button(name: string, button: KCUIButtonElement) {
@@ -144,7 +125,7 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
             this.viewer.addEventListener(
                 KiCanvasLayersChangedEvent.type,
                 () => {
-                    const button = this.#button("zone_fills");
+                    const button = this.button("zone_fills");
                     if (button) {
                         button.selected = (
                             this.viewer as BoardViewer

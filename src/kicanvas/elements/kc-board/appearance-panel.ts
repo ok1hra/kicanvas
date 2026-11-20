@@ -42,6 +42,11 @@ type Preset = { name: string; show: (layer: string) => boolean };
 
 const presets: Preset[] = [
     {
+        name: "Default",
+        show: (l) =>
+            l.endsWith(".Cu") || BoardViewer.default_layers.includes(l),
+    },
+    {
         name: "Copper and outline",
         show: (l) => l.endsWith(".Cu") || l == LayerNames.edge_cuts,
     },
