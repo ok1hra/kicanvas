@@ -1281,7 +1281,12 @@ export class BoardPainter extends DocumentPainter {
     filter_nets: Set<number> | null = null;
 
     /** Paints the given nets (by number) on the overlay layer. */
-    paint_net(board: board_items.KicadPCB, nets: number | number[]) {
+    paint_net(
+        board: board_items.KicadPCB,
+        nets: number | number[],
+        /** Draws more on the overlay, e.g. annotations */
+        extra?: () => void,
+    ) {
         const layer = this.layers.overlay;
 
         this.filter_nets = new Set(typeof nets == "number" ? [nets] : nets);
@@ -1299,9 +1304,10 @@ export class BoardPainter extends DocumentPainter {
 
             this.paint_item(layer, item);
         }
+        this.filter_nets = null;
+        extra?.();
 
         layer.graphics = this.gfx.end_layer();
         layer.graphics.composite_operation = "overlay";
-        this.filter_nets = null;
     }
 }

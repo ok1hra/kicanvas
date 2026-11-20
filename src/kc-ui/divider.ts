@@ -57,6 +57,28 @@ export class KCUIDividerElement extends KCUIElement {
                 pointer-events: none;
             }
 
+            /* A horizontal line between panes stacked in a column. */
+            :host([horizontal]) {
+                cursor: row-resize;
+                border-left: none;
+                border-right: none;
+                border-top: 1px solid #222;
+                border-bottom: 1px solid #222;
+            }
+
+            :host([horizontal])::before {
+                left: 0;
+                right: 0;
+                top: -5px;
+                bottom: -5px;
+            }
+
+            :host([horizontal]) .grip {
+                width: 34px;
+                height: 4px;
+                background-size: 6px 4px;
+            }
+
             :host(:hover),
             :host(.active) {
                 background: #2f5d8a;
@@ -77,6 +99,10 @@ export class KCUIDividerElement extends KCUIElement {
     /** If set, the split ratio is remembered in localStorage. */
     @attribute({ type: String })
     storage_key: string;
+
+    /** A horizontal line between stacked panes, rather than a vertical one. */
+    @attribute({ type: Boolean })
+    horizontal: boolean;
 
     /** Smallest allowed ratio for either pane. */
     min_ratio = 0.1;
@@ -148,12 +174,16 @@ export class KCUIDividerElement extends KCUIElement {
             e.preventDefault();
             this.setPointerCapture(e.pointerId);
             this.classList.add("active");
-            document.body.style.cursor = "col-resize";
+            document.body.style.cursor = this.horizontal
+                ? "row-resize"
+                : "col-resize";
 
             const rect = this.parentElement.getBoundingClientRect();
 
             const move = (e: PointerEvent) => {
-                this.ratio = (e.clientX - rect.left) / rect.width;
+                this.ratio = this.horizontal
+                    ? (e.clientY - rect.top) / rect.height
+                    : (e.clientX - rect.left) / rect.width;
             };
 
             const up = () => {

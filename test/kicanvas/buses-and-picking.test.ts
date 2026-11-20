@@ -7,6 +7,7 @@
 import { assert } from "chai";
 import { BBox, Vec2 } from "../../src/base/math";
 import { KicadPCB, KicadSch } from "../../src/kicad";
+import { instance_for } from "../../src/kicad/schematic";
 import { CrossProbeIndex } from "../../src/kicanvas/cross-probe";
 import { PartInfo } from "../../src/kicanvas/part-info";
 import { Project } from "../../src/kicanvas/project";
@@ -317,5 +318,20 @@ suite("shared links", function () {
         assert.isNull(decode_view("#"));
         assert.isNull(decode_view("#s=1,2,nope,4"));
         assert.equal(decode_view("#part=U5")!.part, "U5");
+    });
+});
+
+suite("sheet instances", function () {
+    test("instance paths with another project's root UUID", function () {
+        const instances = new Map([
+            ["/old-root/sheet/a", "C1_1"],
+            ["/old-root/sheet/b", "C1_2"],
+            ["/root/other", "R9"],
+        ]);
+        assert.equal(instance_for(instances, "/root/other"), "R9");
+        // The schematic was copied from a project with another root.
+        assert.equal(instance_for(instances, "/root/sheet/b"), "C1_2");
+        assert.equal(instance_for(instances, "/root/sheet/a"), "C1_1");
+        assert.isUndefined(instance_for(instances, "/root/sheet/c"));
     });
 });

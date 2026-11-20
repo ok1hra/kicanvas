@@ -4,6 +4,7 @@
     Full text available at: https://opensource.org/licenses/MIT
 */
 
+import { DeferredPromise } from "../../../base/async";
 import { attribute, html } from "../../../base/web-components";
 import { KCUIElement } from "../../../kc-ui";
 import { KiCanvasLoadEvent } from "../../../viewers/base/events";
@@ -32,6 +33,9 @@ export abstract class KCViewerElement<
     @attribute({ type: Boolean })
     disableinteraction: boolean;
 
+    /** Resolved once the viewer is set up and can load documents. */
+    ready = new DeferredPromise<boolean>();
+
     override initialContentCallback() {
         (async () => {
             this.viewer = this.addDisposable(this.make_viewer());
@@ -40,6 +44,7 @@ export abstract class KCViewerElement<
                 this.#chooser.show(x, y, title, items, on_choose);
 
             await this.viewer.setup();
+            this.ready.resolve(true);
 
             this.addDisposable(
                 this.viewer.addEventListener(KiCanvasLoadEvent.type, () => {

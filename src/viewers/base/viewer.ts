@@ -15,10 +15,23 @@ import {
     KiCanvasLoadEvent,
     KiCanvasMouseMoveEvent,
     KiCanvasSelectEvent,
+    KiCanvasViewportEvent,
     type KiCanvasEventMap,
 } from "./events";
 import { ViewLayerSet } from "./view-layers";
 import { Viewport } from "./viewport";
+
+/** A box drawn over the document, see Viewer.annotations. */
+export type Annotation = {
+    bbox: BBox;
+    color: Color;
+    /** Fill, usually a transparent color */
+    fill?: Color;
+    /** Line width, in mm */
+    width?: number;
+    /** Space around the box, in mm */
+    margin?: number;
+};
 
 /** An entry of a chooser menu, see Viewer.chooser. */
 export type ChooserItem<T = unknown> = {
@@ -179,6 +192,7 @@ export abstract class Viewer extends EventTarget {
         if (this.interactive) {
             this.draw();
         }
+        this.dispatchEvent(new KiCanvasViewportEvent());
     }
 
     protected on_mouse_change(e: MouseEvent) {
@@ -354,22 +368,59 @@ export abstract class Viewer extends EventTarget {
 
         layer.clear();
 
-        if (this.#selected) {
-            const bb = this.#selected.copy().grow(this.#selected.w * 0.1);
+        const annotated = this.#annotations.length > 0;
+        if (this.#selected || annotated) {
             this.renderer.start_layer(layer.name);
 
-            this.renderer.line(
-                Polyline.from_BBox(bb, 0.254, this.selection_color),
-            );
-
-            this.renderer.polygon(Polygon.from_BBox(bb, this.selection_color));
+            if (this.#selected) {
+                const bb = this.#selected.copy().grow(this.#selected.w * 0.1);
+                this.renderer.line(
+                    Polyline.from_BBox(bb, 0.254, this.selection_color),
+                );
+                // The fill would wash out the annotations' colors.
+                if (!annotated) {
+                    this.renderer.polygon(
+                        Polygon.from_BBox(bb, this.selection_color),
+                    );
+                }
+            }
+            this.paint_annotations();
 
             layer.graphics = this.renderer.end_layer();
-
-            layer.graphics.composite_operation = "overlay";
+            layer.graphics.composite_operation = annotated
+                ? "source-over"
+                : "overlay";
         }
 
         this.draw();
+    }
+
+    #annotations: Annotation[] = [];
+
+    /**
+     * Boxes drawn over the document, e.g. to mark what changed between two
+     * revisions.
+     */
+    get annotations(): readonly Annotation[] {
+        return this.#annotations;
+    }
+
+    set annotations(list: Annotation[]) {
+        this.#annotations = list;
+        later(() => this.paint_selected());
+    }
+
+    /** Draws the annotations; call between start_layer and end_layer. */
+    protected paint_annotations() {
+        for (const a of this.#annotations) {
+            const bb = a.bbox.copy().grow(a.margin ?? 0.5);
+            if (a.fill) {
+                this.renderer.polygon(Polygon.from_BBox(bb, a.fill));
+            }
+            this.renderer.line(
+                Polyline.from_BBox(bb, a.width ?? 0.25, a.color),
+            );
+        }
     }
 
     abstract zoom_to_page(): void;
