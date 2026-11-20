@@ -4,7 +4,7 @@
     Full text available at: https://opensource.org/licenses/MIT
 */
 
-import { delegate } from "../../../base/events";
+import { delegate, listen } from "../../../base/events";
 import { css, html } from "../../../base/web-components";
 import { KCUIElement } from "../../../kc-ui";
 import type { Project, ProjectPage } from "../../project";
@@ -149,6 +149,14 @@ export class KCSchematicHierarchyPanelElement extends KCUIElement {
                 this.project.set_active_page(page);
             }
         });
+
+        // Another revision of the project can have other sheets.
+        this.addDisposable(
+            listen(this.project, "load", async () => {
+                await this.update();
+                this.#update_current();
+            }),
+        );
 
         // Mark sheets with the cross-probed net or part.
         const on_probe = (e: Event) => {

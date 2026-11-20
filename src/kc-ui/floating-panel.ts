@@ -239,6 +239,7 @@ export class KCUIFloatingPanelElement extends KCUIElement {
         // is up to whoever creates it.
         const { top, left, right } = load_state<PanelState>(this.#state_key);
         if (top !== undefined) {
+            this.#placed = true;
             // Wait for layout so the parent's size is known.
             window.requestAnimationFrame(() => {
                 if (right !== undefined) {
@@ -293,6 +294,7 @@ export class KCUIFloatingPanelElement extends KCUIElement {
             };
 
             const up = () => {
+                this.#placed = true;
                 header.removeEventListener("pointermove", move);
                 header.removeEventListener("pointerup", up);
                 header.removeEventListener("pointercancel", up);
@@ -351,9 +353,28 @@ export class KCUIFloatingPanelElement extends KCUIElement {
         }
     }
 
+    #placed = false;
+
+    /**
+     * Whether the user put the panel somewhere (now or before, see
+     * storage_key), rather than it being where it starts.
+     */
+    get placed() {
+        return this.#placed;
+    }
+
+    /** Changes the text in the header. */
+    set_heading(text: string) {
+        this.heading = text;
+        const span = this.renderRoot.querySelector("header .heading");
+        if (span) {
+            span.textContent = text;
+        }
+    }
+
     #save() {
         const state: Partial<PanelState> = { collapsed: this.collapsed };
-        if (this.style.top) {
+        if (this.style.top && this.#placed) {
             const { left, top } = this.#position();
             state.top = top;
             const parent = this.#parent;

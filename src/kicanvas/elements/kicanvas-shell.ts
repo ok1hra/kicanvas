@@ -22,11 +22,20 @@ import {
 } from "../../viewers/base/events";
 import { CrossProbe, CrossProbeIndex } from "../cross-probe";
 import { PartInfo } from "../part-info";
-import { Project } from "../project";
+import { Project, type ProjectPage } from "../project";
 import { KCPartInfoElement } from "./common/part-info";
 import { KCSearchBoxElement } from "./common/search-box";
 import { build_search_items, type SearchItem } from "../search";
 import { decode_view, encode_view, type ViewState } from "../share";
+import {
+    WORKTREE,
+    git_commits,
+    git_info,
+    revision_fs,
+    type Commit,
+} from "../compare/revisions";
+import { KCRevisionListElement } from "./common/revision-list";
+import type { KCUIFloatingPanelElement } from "../../kc-ui";
 import {
     KCCompareWorkspaceElement,
     type CompareMode,
@@ -128,7 +137,11 @@ class KiCanvasShellElement extends KCUIElement {
             }
         }
 
-        elm.textContent = text ?? KiCanvasShellElement.default_hint;
+        text ??= KiCanvasShellElement.default_hint;
+        if (this.#revision != WORKTREE && !this.#compare?.active) {
+            text = `Revision ${this.#revision_label()} · ${text}`;
+        }
+        elm.textContent = text;
     }
 
     /**
@@ -153,6 +166,18 @@ class KiCanvasShellElement extends KCUIElement {
         const half = bar.offsetWidth / 2;
         x = Math.max(half + 4, Math.min(x, main.clientWidth - half - 4));
         bar.style.left = `${x}px`;
+
+        // The revision palette starts below the Compare button.
+        const panel = this.#revision_panel;
+        const compare = bar.querySelector<HTMLElement>("button[name=compare]");
+        if (panel && !panel.hidden && !panel.placed && compare) {
+            const r = compare.getBoundingClientRect();
+            const m = main.getBoundingClientRect();
+            panel.move_to(
+                r.left + r.width / 2 - m.left - panel.offsetWidth / 2,
+                r.bottom - m.top + 6,
+            );
+        }
     }
 
     /** Shows a part or net picked in the search box in both views. */
@@ -250,6 +275,9 @@ class KiCanvasShellElement extends KCUIElement {
         const sv = this.#schematic_viewer();
         const bv = this.#board_viewer();
         const state: ViewState = {};
+        if (this.#revision != WORKTREE) {
+            state.rev = this.#revision;
+        }
         if (sv?.document) {
             state.sheet = this.#schematic_app.current_page?.project_path;
             state.sch = sv.viewport.camera.bbox;
@@ -282,28 +310,31 @@ class KiCanvasShellElement extends KCUIElement {
         url.hash = encode_view(this.#view_state());
         window.history.replaceState(null, "", url);
 
+        const button = this.renderRoot.querySelector<HTMLElement>(
+            "main .center-bar button[name=share]",
+        )!;
+        if (await copy_text(url.href)) {
+            // Just confirm it on the button for a moment.
+            button.setAttribute("copied", "");
+            window.clearTimeout(this.#share_timer);
+            this.#share_timer = window.setTimeout(
+                () => button.removeAttribute("copied"),
+                2000,
+            );
+            return;
+        }
+
+        // No clipboard access at all: show the link to copy by hand.
         const popup = this.renderRoot.querySelector<HTMLElement>(
             "main .center-bar .share-popup",
         )!;
         const input = popup.querySelector("input")!;
-        const msg = popup.querySelector(".msg")!;
+        popup.querySelector(".msg")!.textContent = "Copy this link:";
         input.value = url.href;
-
-        let copied = false;
-        try {
-            await navigator.clipboard.writeText(url.href);
-            copied = true;
-        } catch {
-            // No clipboard access (e.g. not a secure context).
-        }
-        msg.textContent = copied
-            ? "Link copied to the clipboard"
-            : "Copy this link:";
         popup.hidden = false;
         input.focus();
         input.select();
 
-        window.clearTimeout(this.#share_timer);
         const close = (e?: Event) => {
             if (e && e.composedPath().includes(popup)) {
                 return;
@@ -321,12 +352,148 @@ class KiCanvasShellElement extends KCUIElement {
         };
         window.addEventListener("pointerdown", close, true);
         window.addEventListener("keydown", on_key, true);
-        if (copied) {
-            this.#share_timer = window.setTimeout(() => close(), 5000);
-        }
     }
 
     #share_timer = 0;
+
+    #started = false;
+
+    /** The revision shown: a commit's SHA, or the working copy. */
+    #revision = WORKTREE;
+    #commits: Commit[] = [];
+
+    get #revision_panel() {
+        return this.renderRoot.querySelector<KCUIFloatingPanelElement>(
+            "main > kc-ui-floating-panel.revision",
+        );
+    }
+
+    #revision_label(rev = this.#revision) {
+        if (rev == WORKTREE) {
+            return "working copy";
+        }
+        const c = this.#commits.find((c) => c.sha == rev);
+        return c ? `${c.short} · ${c.date.slice(0, 10)}` : rev.slice(0, 7);
+    }
+
+    /** Shows the revision palette if the project has git history. */
+    async #setup_history() {
+        const info = await git_info();
+        if (!info.available) {
+            return;
+        }
+        try {
+            this.#commits = await git_commits();
+        } catch {
+            return;
+        }
+        const panel = this.#revision_panel;
+        if (!panel) {
+            return;
+        }
+        panel
+            .querySelector<KCRevisionListElement>("kc-revision-list")!
+            .set_history(info, this.#commits, this.#revision);
+        panel.set_heading(`Revision · ${this.#revision_label()}`);
+        panel.hidden = false;
+        window.requestAnimationFrame(() => this.#position_bar());
+    }
+
+    /**
+     * Shows the project at another revision, keeping what's shown (sheet,
+     * zoom, selection and the board's layers) or showing the given view.
+     */
+    async #show_revision(rev: string, view?: ViewState) {
+        if (rev == this.#revision && !view) {
+            return;
+        }
+        const state = view ?? this.#view_state();
+        state.rev = undefined;
+        state.compare = undefined;
+
+        const bv = this.#board_viewer();
+        const layers = bv?.document
+            ? {
+                  visible: [...bv.layers.in_order()]
+                      .filter((l) => l.visible)
+                      .map((l) => l.name),
+                  zone_fills: bv.zone_fills,
+              }
+            : undefined;
+
+        let fs;
+        try {
+            fs = await revision_fs(rev);
+        } catch (e) {
+            console.error(e);
+            return;
+        }
+
+        this.loading = true;
+        try {
+            await this.project.load(fs);
+        } catch (e) {
+            console.error(e);
+            this.loading = false;
+            return;
+        }
+        this.#revision = rev;
+        this.has_schematic = this.project.has_schematics;
+        this.has_board = this.project.has_boards;
+
+        // Show the same sheet (if the revision has it) and the board.
+        const shown = (
+            app: KCSchematicAppElement | KCBoardAppElement,
+            page: ProjectPage | undefined,
+        ) => {
+            const viewer = page && app.viewer;
+            if (!viewer) {
+                return null;
+            }
+            return new Promise<void>((resolve) => {
+                const once = viewer.addEventListener(
+                    KiCanvasLoadEvent.type,
+                    () => {
+                        once.dispose();
+                        resolve();
+                    },
+                );
+                app.load(page);
+            });
+        };
+        const sheet =
+            (state.sheet && this.project.page_by_path(state.sheet)) ||
+            this.project.root_schematic_page;
+        const board = [...this.project.pages()].find((p) => p.type == "pcb");
+        await Promise.race([
+            Promise.all([
+                shown(this.#schematic_app, sheet),
+                shown(this.#board_app, board),
+            ]),
+            new Promise((r) => window.setTimeout(r, 30000)),
+        ]);
+        this.loading = false;
+        this.loaded = true;
+        await this.#setup_workspace();
+
+        const nbv = this.#board_viewer();
+        if (layers && nbv?.document) {
+            for (const layer of nbv.layers.in_order()) {
+                layer.visible = layers.visible.includes(layer.name);
+            }
+            nbv.zone_fills = layers.zone_fills;
+        }
+        await this.#restore_view(state);
+
+        const panel = this.#revision_panel;
+        if (panel) {
+            panel.querySelector<KCRevisionListElement>(
+                "kc-revision-list",
+            )!.current = rev;
+            panel.set_heading(`Revision · ${this.#revision_label()}`);
+        }
+        this.#update_hint();
+    }
 
     #compare?: KCCompareWorkspaceElement;
 
@@ -361,6 +528,14 @@ class KiCanvasShellElement extends KCUIElement {
             // (Moving the buttons around would render them again.)
             tools("left").replaceChildren(...this.#compare.toolbar_left);
             tools("right").replaceChildren(...this.#compare.toolbar_right);
+        }
+        // Compare the shown revision with the one before it.
+        if (!revisions && this.#revision != WORKTREE) {
+            const i = this.#commits.findIndex((c) => c.sha == this.#revision);
+            const before = this.#commits[i + 1];
+            if (i >= 0 && before) {
+                revisions = { a: before.sha, b: this.#revision };
+            }
         }
         this.#part_info.hide();
         this.comparing = true;
@@ -502,6 +677,9 @@ class KiCanvasShellElement extends KCUIElement {
             this.#update_hint(),
         );
 
+        // Buttons change width once the icon font is loaded.
+        document.fonts?.ready.then(() => this.#position_bar());
+
         // The search box and buttons sit at the top end of the divider.
         const workspace = this.renderRoot.querySelector("main")!;
         workspace.addEventListener(KCUIDividerElement.resize_event, () =>
@@ -511,6 +689,10 @@ class KiCanvasShellElement extends KCUIElement {
         workspace.addEventListener(KCSearchBoxElement.pick_event, (e) =>
             this.#on_search_pick((e as CustomEvent<SearchItem>).detail),
         );
+        workspace.addEventListener(KCRevisionListElement.pick_event, (e) =>
+            this.#show_revision((e as CustomEvent<string>).detail),
+        );
+
         const share = this.renderRoot.querySelector(
             "main .center-bar button[name=share]",
         )!;
@@ -833,10 +1015,19 @@ class KiCanvasShellElement extends KCUIElement {
             );
         }
 
-        // Opened from a shared link.
-        const shared = decode_view(window.location.hash);
-        if (shared) {
-            this.#restore_view(shared).catch((e) =>
+        // Only once, not after showing another revision.
+        if (!this.#started) {
+            this.#started = true;
+            this.#setup_history();
+
+            // Opened from a shared link.
+            const shared = decode_view(window.location.hash);
+            const restore = shared?.rev
+                ? this.#show_revision(shared.rev, shared)
+                : shared
+                  ? this.#restore_view(shared)
+                  : null;
+            restore?.catch((e) =>
                 console.error("Couldn't restore the shared view", e),
             );
         }
@@ -945,9 +1136,10 @@ class KiCanvasShellElement extends KCUIElement {
                                     type="button"
                                     class="pill"
                                     name="share"
-                                    title="Copy a link that opens this view: sheet, zoom and highlight">
+                                    title="Copy a link to the clipboard that opens this view: sheet, zoom and highlight">
                                     <kc-ui-icon>share</kc-ui-icon>
-                                    Share
+                                    <span class="label">Share</span>
+                                    <span class="done">Link copied</span>
                                 </button>
                                 <button
                                     type="button"
@@ -968,6 +1160,14 @@ class KiCanvasShellElement extends KCUIElement {
                             <span class="set compare"></span>
                         </div>
                     </div>
+                    <kc-ui-floating-panel
+                        class="revision"
+                        heading="Revision"
+                        storage-key="revision"
+                        collapsed
+                        hidden>
+                        <kc-revision-list></kc-revision-list>
+                    </kc-ui-floating-panel>
                     <div class="status" role="status">
                         <span class="hint"></span>
                         <span class="coords"></span>
@@ -976,6 +1176,34 @@ class KiCanvasShellElement extends KCUIElement {
             </kc-ui-app>
         `;
     }
+}
+
+/**
+ * Puts text on the clipboard. The Clipboard API needs a secure context
+ * (https or localhost); otherwise the old "copy" command still works.
+ */
+async function copy_text(text: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        // Try the old way.
+    }
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try {
+        ok = document.execCommand("copy");
+    } catch {
+        ok = false;
+    }
+    area.remove();
+    return ok;
 }
 
 function first_board(project: Project): KicadPCB | undefined {
