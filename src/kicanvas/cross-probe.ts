@@ -5,6 +5,7 @@
 */
 
 import { Disposables, type IDisposable } from "../base/disposable";
+import { BBox } from "../base/math";
 import type { KicadPCB } from "../kicad";
 import { Footprint } from "../kicad/board";
 import { GlobalLabel, KicadSch, SchematicSymbol } from "../kicad/schematic";
@@ -197,6 +198,41 @@ export class CrossProbe implements IDisposable {
     #index: CrossProbeIndex | undefined;
     #busy = false;
     #state: ProbeState = null;
+    /** Zoom to the probe when it's next shown in the schematic. */
+    #zoom_schematic = false;
+
+    /**
+     * Selects a part in both views and zooms to it, switching to its
+     * sheet if needed. Used by search.
+     */
+    probe_part(footprint: Footprint) {
+        this.#guard(() => {
+            this.#state = { kind: "footprint", footprint };
+            this.board_viewer.select(footprint);
+            this.board_viewer.zoom_to_item(footprint.bbox);
+            this.#zoom_schematic = true;
+            this.#apply_to_schematic(false);
+            this.#announce_pages();
+        });
+    }
+
+    /**
+     * Highlights a net in both views and zooms to it. The schematic shows
+     * the first sheet with the net if the current one doesn't have it.
+     */
+    probe_net(name: string) {
+        this.#guard(() => {
+            this.#state = { kind: "net", name };
+            this.board_viewer.highlight_net(name);
+            const bbox = this.board_viewer.net_bbox(name);
+            if (bbox.valid) {
+                this.board_viewer.zoom_to_item(bbox);
+            }
+            this.#zoom_schematic = true;
+            this.#apply_to_schematic(false);
+            this.#announce_pages();
+        });
+    }
 
     constructor(
         public project: Project,
@@ -341,7 +377,20 @@ export class CrossProbe implements IDisposable {
         }
 
         if (state?.kind == "net") {
-            sv.highlight_nets(index.sheet_nets_for(page, state.name));
+            const nets = index.sheet_nets_for(page, state.name);
+            if (!nets.length && this.#zoom_schematic && !sheet_changed) {
+                // Show a sheet that has the net; applied again once loaded.
+                const other = index.pages_with_net(state.name)[0];
+                if (other) {
+                    this.project.set_active_page(other);
+                    return;
+                }
+            }
+            sv.highlight_nets(nets);
+            if (this.#zoom_schematic && nets.length) {
+                sv.zoom_to_item(BBox.combine(nets.map((n) => n.bbox)));
+                this.#zoom_schematic = false;
+            }
             return;
         }
 
@@ -350,9 +399,11 @@ export class CrossProbe implements IDisposable {
             const here = placements.find((p) => p.page == page);
             if (here) {
                 sv.select(here.symbol);
+                // Show the part with its surroundings.
                 if (sv.selected) {
-                    sv.ensure_visible(sv.selected);
+                    sv.zoom_to_item(sv.selected);
                 }
+                this.#zoom_schematic = false;
             } else if (placements.length && !sheet_changed) {
                 // Show the sheet; this is applied again once it's loaded.
                 this.project.set_active_page(placements[0]!.page);

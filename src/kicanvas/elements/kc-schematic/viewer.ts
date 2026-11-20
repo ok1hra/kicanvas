@@ -6,6 +6,7 @@
 
 import { SchematicViewer } from "../../../viewers/schematic/viewer";
 import type { ProjectPage } from "../../project";
+import kicad_dark_schematic from "../../themes/kicad-dark-schematic";
 import { KCViewerElement } from "../common/viewer";
 
 export class KCSchematicViewerElement extends KCViewerElement<SchematicViewer> {
@@ -18,15 +19,33 @@ export class KCSchematicViewerElement extends KCViewerElement<SchematicViewer> {
         await this.viewer.load(src);
     }
 
+    #dark = false;
+
+    /** Use dark schematic colors, regardless of the theme. */
+    get dark() {
+        return this.#dark;
+    }
+
+    set dark(value: boolean) {
+        this.#dark = value;
+        if (this.viewer) {
+            this.update_theme();
+            this.viewer.paint();
+            this.viewer.draw();
+        }
+    }
+
     protected override update_theme(): void {
-        this.viewer.theme = this.themeObject.schematic;
+        this.viewer.theme = this.#dark
+            ? kicad_dark_schematic
+            : this.themeObject.schematic;
     }
 
     protected override make_viewer(): SchematicViewer {
         return new SchematicViewer(
             this.canvas,
             !this.disableinteraction,
-            this.themeObject.schematic,
+            this.#dark ? kicad_dark_schematic : this.themeObject.schematic,
         );
     }
 }

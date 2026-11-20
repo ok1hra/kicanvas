@@ -5,6 +5,7 @@
 */
 
 import { html } from "../../../base/web-components";
+import type { KCUIButtonElement } from "../../../kc-ui";
 import { KCViewerAppElement } from "../common/app";
 import { KCSchematicViewerElement } from "./viewer";
 
@@ -38,6 +39,11 @@ export class KCSchematicAppElement extends KCViewerAppElement<KCSchematicViewerE
             return;
         }
 
+        // The part info card shows the properties in floating mode.
+        if (this.floating) {
+            return;
+        }
+
         // Otherwise, selecting the same item twice will show the
         // properties panel.
         this.change_activity("properties");
@@ -57,6 +63,63 @@ export class KCSchematicAppElement extends KCViewerAppElement<KCSchematicViewerE
 
     protected override get menu_heading() {
         return "Schematic";
+    }
+
+    static #dark_key = "kc:schematic-dark";
+
+    #dark_mode_from_storage() {
+        try {
+            return (
+                window.localStorage.getItem(KCSchematicAppElement.#dark_key) ==
+                "1"
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    protected override make_bottom_buttons() {
+        const dark = this.#dark_mode_from_storage();
+        if (dark) {
+            // Applied once the viewer element exists.
+            window.queueMicrotask(() => this.#set_dark(true));
+        }
+        return [
+            html`<kc-ui-button
+                slot="right"
+                variant="toolbar"
+                name="dark_mode"
+                title="Dark mode"
+                icon="dark_mode"
+                selected="${dark}">
+            </kc-ui-button>`,
+        ];
+    }
+
+    #set_dark(dark: boolean) {
+        const viewer_elm = this.renderRoot.querySelector(
+            "kc-schematic-viewer",
+        ) as KCSchematicViewerElement | null;
+        if (viewer_elm) {
+            viewer_elm.dark = dark;
+        }
+        try {
+            window.localStorage.setItem(
+                KCSchematicAppElement.#dark_key,
+                dark ? "1" : "0",
+            );
+        } catch {
+            // Storage unavailable.
+        }
+    }
+
+    protected override on_button(name: string, button: KCUIButtonElement) {
+        if (name == "dark_mode") {
+            button.selected = !button.selected;
+            this.#set_dark(button.selected);
+            return true;
+        }
+        return false;
     }
 
     protected override make_sections() {

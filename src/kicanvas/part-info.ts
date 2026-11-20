@@ -14,6 +14,14 @@ export type PartField = { name: string; value: string };
 /** Fields shown before "Show all", in this order. */
 export const key_fields = ["ID", "Datasheet", "part_value"];
 
+/** Link to a part in Factorify, by its ID field. */
+export function factorify_href(id: string | undefined): string | undefined {
+    const v = id?.trim();
+    return v && /^\d+$/.test(v)
+        ? `https://prusa3d.factorify.cz/ui/goods/${v}`
+        : undefined;
+}
+
 /**
  * The metadata of a part (component): its symbol's fields, plus a few
  * things from its footprint and where it is in the schematic.
@@ -74,7 +82,7 @@ export class PartInfo {
             add("Exclude from BOM", "yes");
         }
         if (footprint) {
-            PartInfo.#add_board_fields(footprint, add);
+            PartInfo.#add_board_fields(footprint, add, fields);
         }
 
         return new PartInfo(
@@ -99,7 +107,7 @@ export class PartInfo {
         if (!fields.some((f) => f.name == "Reference")) {
             fields.unshift({ name: "Reference", value: footprint.reference });
         }
-        PartInfo.#add_board_fields(footprint, add);
+        PartInfo.#add_board_fields(footprint, add, fields);
 
         return new PartInfo(footprint.reference, footprint.value ?? "", fields);
     }
@@ -107,8 +115,17 @@ export class PartInfo {
     static #add_board_fields(
         footprint: Footprint,
         add: (name: string, value: string | undefined) => void,
+        fields: PartField[],
     ) {
-        add("Board footprint", footprint.library_link);
+        // Only when it differs from the symbol's Footprint field.
+        if (
+            !fields.some(
+                (f) =>
+                    f.name == "Footprint" && f.value == footprint.library_link,
+            )
+        ) {
+            add("Board footprint", footprint.library_link);
+        }
         add("Board side", footprint.layer?.startsWith("B.") ? "Bottom" : "Top");
         const at = footprint.at;
         if (at) {

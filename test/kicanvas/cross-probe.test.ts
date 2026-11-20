@@ -11,7 +11,12 @@ import {
     CrossProbeIndex,
     footprint_path,
 } from "../../src/kicanvas/cross-probe";
-import { PartInfo, datasheet_href } from "../../src/kicanvas/part-info";
+import {
+    PartInfo,
+    datasheet_href,
+    factorify_href,
+} from "../../src/kicanvas/part-info";
+import { build_search_items, search } from "../../src/kicanvas/search";
 import { Project } from "../../src/kicanvas/project";
 import { LocalFileSystem } from "../../src/kicanvas/services/vfs";
 import { SheetConnectivity } from "../../src/viewers/schematic/connectivity";
@@ -241,5 +246,50 @@ suite("part info", function () {
         assert.isUndefined(datasheet_href(undefined));
         assert.isUndefined(datasheet_href("javascript:alert(1)"));
         assert.isUndefined(datasheet_href("${KIPRJMOD}/doc.pdf"));
+    });
+});
+
+suite("search", function () {
+    test("finds parts by reference, ID and MPN, and nets", async function () {
+        const { project, board } = await load();
+        const index = new CrossProbeIndex(project, board);
+        const items = build_search_items(project, board, index);
+
+        const names = (q: string) =>
+            search(items, q).map((i) =>
+                i.kind == "part" ? i.reference : `net:${i.name}`,
+            );
+
+        // Nothing until the second character.
+        assert.deepEqual(names("R"), []);
+        // Exact matches come first.
+        assert.deepEqual(names("r2"), ["R2"]);
+        assert.deepEqual(names("6143"), ["R1"]);
+        assert.deepEqual(names("10k 1"), ["R1", "R2"]);
+        assert.deepEqual(names("mid"), ["net:/MID"]);
+        assert.deepEqual(names("VIN"), ["net:VIN"]);
+
+        const r1 = search(items, "R1")[0]!;
+        assert.equal(r1.kind, "part");
+        if (r1.kind == "part") {
+            assert.equal(r1.id, "6143");
+            assert.equal(r1.mpn, "10k 1%");
+            assert.equal(r1.footprint?.reference, "R1");
+            assert.equal(r1.symbol?.reference, "R1");
+        }
+    });
+
+    test("Factorify links", function () {
+        assert.equal(
+            factorify_href("6027"),
+            "https://prusa3d.factorify.cz/ui/goods/6027",
+        );
+        assert.equal(
+            factorify_href(" 42 "),
+            "https://prusa3d.factorify.cz/ui/goods/42",
+        );
+        assert.isUndefined(factorify_href(""));
+        assert.isUndefined(factorify_href("abc"));
+        assert.isUndefined(factorify_href(undefined));
     });
 });

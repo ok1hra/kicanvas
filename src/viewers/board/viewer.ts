@@ -59,10 +59,16 @@ export class BoardViewer extends DocumentViewer<
         return this.board.setup?.grid_origin ?? new Vec2(0, 0);
     }
 
+    /** Whether clicks select things; off while e.g. measuring. */
+    picking_enabled = true;
+
     protected override on_pick(
         mouse: Vec2,
         items: Generator<{ layer: ViewLayer; bbox: BBox }, void, unknown>,
     ): void {
+        if (!this.picking_enabled) {
+            return;
+        }
         const selectableItems = new Map<string, unknown>();
         for (const { bbox } of items) {
             const item = bbox.context;
@@ -100,6 +106,27 @@ export class BoardViewer extends DocumentViewer<
     /** The number of the highlighted net, if any. */
     get highlighted_net() {
         return this.#highlighted_net;
+    }
+
+    /** Bounding box of everything drawn for a net (by number or name). */
+    net_bbox(net: number | string): BBox {
+        if (typeof net == "string") {
+            net = this.board.net_by_name(net)?.number ?? -1;
+        }
+        const boxes: BBox[] = [];
+        for (const layer of this.layers.in_order()) {
+            for (const [item, bbox] of layer.bboxes) {
+                const n = (item as { net?: unknown })?.net;
+                const number =
+                    typeof n == "number"
+                        ? n
+                        : (n as { number?: number } | undefined)?.number;
+                if (number === net) {
+                    boxes.push(bbox);
+                }
+            }
+        }
+        return BBox.combine(boxes);
     }
 
     override select(item: board_items.Footprint | string | BBox | null) {

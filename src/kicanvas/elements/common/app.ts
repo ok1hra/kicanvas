@@ -149,11 +149,43 @@ export abstract class KCViewerAppElement<
                 }
                 case "flip_view":
                     this.#viewer_elm.viewer.flip_view();
+                    target.selected = !target.selected;
+                    break;
+                case "zoom_to_fit":
+                    // Handled by the bottom toolbar.
                     break;
                 default:
-                    console.warn("Unknown button", e);
+                    if (!this.on_button(target.name ?? "", target)) {
+                        console.warn("Unknown button", e);
+                    }
             }
         });
+    }
+
+    /**
+     * Handles a click on one of the app's own buttons (see
+     * make_bottom_buttons()). Returns false for unknown buttons.
+     */
+    protected on_button(name: string, button: KCUIButtonElement): boolean {
+        return false;
+    }
+
+    /**
+     * Buttons for the bottom toolbar in floating mode, with slot="left" or
+     * slot="right".
+     */
+    protected make_bottom_buttons(): ElementOrFragment[] {
+        return [];
+    }
+
+    /** Whether the bottom toolbar shows the mouse position. */
+    protected get show_coordinates() {
+        return false;
+    }
+
+    /** Elements drawn over the viewer in floating mode (e.g. tools). */
+    protected make_overlays(): ElementOrFragment[] {
+        return [];
     }
 
     protected abstract on_viewer_select(
@@ -304,10 +336,12 @@ export abstract class KCViewerAppElement<
 
         if (controls == "floating") {
             this.#activity_bar = null;
+            // Menus start collapsed so they don't cover the design.
             this.#floating_panel = html`<kc-ui-floating-panel
                 heading="${this.menu_heading}"
                 anchor="${this.menu_anchor}"
-                storage-key="${this.localName}">
+                storage-key="${this.localName}"
+                collapsed>
                 ${this.make_sections()}
             </kc-ui-floating-panel>` as KCUIFloatingPanelElement;
         } else if (controls == "full") {
@@ -345,6 +379,7 @@ export abstract class KCViewerAppElement<
 
         if (
             controlslist["flipview"] &&
+            controls != "floating" &&
             this.#viewer_elm instanceof KCBoardViewerElement
         ) {
             top_toolbar_buttons.push(
@@ -363,14 +398,21 @@ export abstract class KCViewerAppElement<
         </kc-ui-floating-toolbar>`;
 
         let bottom_toolbar = null;
-        if (controls != "none") {
+        if (controls == "floating") {
+            bottom_toolbar = html`<kc-viewer-bottom-toolbar
+                mode="floating"
+                coordinates="${this.show_coordinates}">
+                ${this.make_bottom_buttons()}
+            </kc-viewer-bottom-toolbar>`;
+        } else if (controls != "none") {
             bottom_toolbar = html`<kc-viewer-bottom-toolbar></kc-viewer-bottom-toolbar>`;
         }
 
         return html`<kc-ui-split-view vertical>
             <kc-ui-view class="grow">
-                ${top_toolbar} ${this.#viewer_elm} ${bottom_toolbar}
-                ${this.#floating_panel}
+                ${top_toolbar} ${this.#viewer_elm}
+                ${controls == "floating" ? this.make_overlays() : null}
+                ${bottom_toolbar} ${this.#floating_panel}
             </kc-ui-view>
             ${resizer} ${this.#activity_bar}
         </kc-ui-split-view>`;

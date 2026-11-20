@@ -206,6 +206,21 @@ export abstract class Viewer extends EventTarget {
     #quiet = false;
 
     /**
+     * Zooms to an item and some of its surroundings, so that it can be seen
+     * in context. Counts as the user moving the camera.
+     *
+     * @param bbox - the item's bounding box
+     */
+    zoom_to_item(bbox: BBox) {
+        const size = Math.max(bbox.w, bbox.h);
+        // Between 15 and 40mm around the item, depending on its size.
+        const margin = Math.min(40, Math.max(15, size));
+        this.viewport.camera.bbox = bbox.grow(margin);
+        this.viewport.user_moved_camera = true;
+        this.draw();
+    }
+
+    /**
      * Moves the camera so that the given box is in view, zooming out if it
      * doesn't fit. Counts as the user moving the camera.
      */
