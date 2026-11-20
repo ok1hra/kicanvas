@@ -15,14 +15,17 @@ import type { SchematicViewer } from "../../viewers/schematic/viewer";
 import { Footprint, KicadPCB } from "../../kicad/board";
 import { SchematicSymbol } from "../../kicad/schematic";
 import {
+    KiCanvasLoadEvent,
     KiCanvasNetSelectEvent,
     KiCanvasSelectEvent,
 } from "../../viewers/base/events";
 import { CrossProbe, CrossProbeIndex } from "../cross-probe";
 import { PartInfo } from "../part-info";
 import { Project } from "../project";
-import type { KCPartInfoElement } from "./common/part-info";
-import "./common/part-info";
+import { KCPartInfoElement } from "./common/part-info";
+import { KCSearchBoxElement } from "./common/search-box";
+import { build_search_items, type SearchItem } from "../search";
+import { KCUIDividerElement } from "../../kc-ui";
 import { GitHubFileSystem } from "../services/github-vfs";
 import { CodebergFileSystem } from "../services/codeberg-vfs";
 import { FetchFileSystem, type IFileSystem } from "../services/vfs";
@@ -73,10 +76,129 @@ class KiCanvasShellElement extends KCUIElement {
     #board_app: KCBoardAppElement;
     #cross_probe?: CrossProbe;
     #part_info: KCPartInfoElement;
+    #search: KCSearchBoxElement;
     #index?: CrossProbeIndex;
     #workspace_listeners: { dispose(): void }[] = [];
     /** Where the user last pressed the pointer, relative to <main> */
     #last_pointer = { x: 0, y: 0 };
+
+    /** Hints set by tools (search, measure), which take precedence. */
+    #tool_hints = new Map<string, string>();
+
+    /** Fired (on window) by tools to set or clear their hint. */
+    static hint_event = "kicanvas:hint";
+
+    static default_hint =
+        "Scroll: zoom · Middle drag or Shift/Ctrl+scroll: pan · Click: select a part or net";
+
+    /** Updates the one line hint at the bottom of the page. */
+    #update_hint() {
+        const elm = this.renderRoot.querySelector("main > .hint");
+        if (!elm) {
+            return;
+        }
+
+        let text = [...this.#tool_hints.values()].at(-1);
+
+        if (!text) {
+            const card = this.#part_info;
+            const bv = this.#board_app?.viewer as BoardViewer | undefined;
+            const net =
+                bv?.highlighted_net != null
+                    ? bv.board.get_netname_by_number(bv.highlighted_net)
+                    : undefined;
+            if (card?.open && card.info) {
+                text = `${card.info.reference} selected · Click elsewhere or Esc to clear`;
+            } else if (net) {
+                text = `Net ${net} highlighted · Esc to clear`;
+            }
+        }
+
+        elm.textContent = text ?? KiCanvasShellElement.default_hint;
+    }
+
+    /** Places the search box at the top of the divider, or in the middle. */
+    #position_search() {
+        const main = this.renderRoot.querySelector("main");
+        const left = this.renderRoot.querySelector<HTMLElement>("main > .left");
+        if (!main || !this.#search) {
+            return;
+        }
+        const x =
+            this.has_schematic && this.has_board && left
+                ? left.offsetWidth + 3
+                : main.clientWidth / 2;
+        this.#search.style.left = `${x}px`;
+    }
+
+    /** Shows a part or net picked in the search box in both views. */
+    #on_search_pick(item: SearchItem) {
+        const sv = this.project.has_schematics
+            ? (this.#schematic_app.viewer as SchematicViewer)
+            : undefined;
+        const bv = this.project.has_boards
+            ? (this.#board_app.viewer as BoardViewer)
+            : undefined;
+
+        if (item.kind == "net") {
+            this.#part_info.hide();
+            if (this.#cross_probe) {
+                this.#cross_probe.probe_net(item.name);
+            } else if (bv) {
+                bv.highlight_net(item.name);
+                const bbox = bv.net_bbox(item.name);
+                if (bbox.valid) {
+                    bv.zoom_to_item(bbox);
+                }
+            }
+            window.setTimeout(() => this.#update_hint());
+            return;
+        }
+
+        if (item.footprint && this.#cross_probe) {
+            this.#cross_probe.probe_part(item.footprint);
+            return;
+        }
+        if (item.footprint && bv) {
+            bv.select(item.footprint);
+            bv.zoom_to_item(item.footprint.bbox);
+            return;
+        }
+
+        // A part that's only in the schematic.
+        const { page, symbol } = item;
+        if (sv && page && symbol) {
+            const show = () => {
+                sv.select(symbol);
+                if (sv.selected) {
+                    sv.zoom_to_item(sv.selected);
+                }
+            };
+            if (this.#schematic_app.current_page == page) {
+                show();
+            } else {
+                const once = sv.addEventListener(KiCanvasLoadEvent.type, () => {
+                    once.dispose();
+                    show();
+                });
+                this.project.set_active_page(page);
+            }
+        }
+    }
+
+    /** Clears the selection and highlights in both views. */
+    #clear_selection() {
+        if (this.project.has_boards) {
+            (this.#board_app.viewer as BoardViewer | undefined)?.select(null);
+        }
+        if (this.project.has_schematics) {
+            (this.#schematic_app.viewer as SchematicViewer | undefined)?.select(
+                null,
+            );
+        }
+        this.#part_info.hide();
+        this.#update_hint();
+    }
 
     constructor() {
         super();
@@ -107,6 +229,78 @@ class KiCanvasShellElement extends KCUIElement {
     public open_file_button: HTMLButtonElement;
 
     override initialContentCallback() {
+        // The hint line: tools set theirs with a hint event, and it follows
+        // the selection otherwise.
+        const on_hint = (e: Event) => {
+            const { source, text } = (
+                e as CustomEvent<{ source: string; text: string | null }>
+            ).detail;
+            this.#tool_hints.delete(source);
+            if (text) {
+                this.#tool_hints.set(source, text);
+            }
+            this.#update_hint();
+        };
+        window.addEventListener(KiCanvasShellElement.hint_event, on_hint);
+        this.addDisposable({
+            dispose: () =>
+                window.removeEventListener(
+                    KiCanvasShellElement.hint_event,
+                    on_hint,
+                ),
+        });
+
+        this.addEventListener(KCPartInfoElement.hidden_event, () =>
+            this.#update_hint(),
+        );
+
+        // The search box sits at the top end of the divider.
+        const workspace = this.renderRoot.querySelector("main")!;
+        workspace.addEventListener(KCUIDividerElement.resize_event, () =>
+            this.#position_search(),
+        );
+        new ResizeObserver(() => this.#position_search()).observe(workspace);
+        workspace.addEventListener(KCSearchBoxElement.pick_event, (e) =>
+            this.#on_search_pick((e as CustomEvent<SearchItem>).detail),
+        );
+        workspace.addEventListener(KCSearchBoxElement.focus_event, (e) => {
+            const focused = (e as CustomEvent<boolean>).detail;
+            window.dispatchEvent(
+                new CustomEvent(KiCanvasShellElement.hint_event, {
+                    detail: {
+                        source: "search",
+                        text: focused
+                            ? "Type 2+ characters: reference, ID, MPN or net name · ↑↓ and Enter: pick · Esc: close"
+                            : null,
+                    },
+                }),
+            );
+        });
+
+        // Esc clears the selection, unless a tool uses it.
+        const on_key = (e: KeyboardEvent) => {
+            const typing = (e.composedPath()[0] as Element)?.closest?.(
+                "input, textarea",
+            );
+            if (e.key == "/" && this.loaded && !typing) {
+                e.preventDefault();
+                this.#search.focus();
+                return;
+            }
+            if (
+                e.key == "Escape" &&
+                this.loaded &&
+                !this.#tool_hints.size &&
+                !e.defaultPrevented
+            ) {
+                this.#clear_selection();
+            }
+        };
+        window.addEventListener("keydown", on_key);
+        this.addDisposable({
+            dispose: () => window.removeEventListener("keydown", on_key),
+        });
+
         // Remember where parts are clicked, to show their info there.
         const main = this.renderRoot.querySelector("main")!;
         main.addEventListener(
@@ -260,6 +454,27 @@ class KiCanvasShellElement extends KCUIElement {
             return this.#index;
         };
 
+        // Search: everything in the project.
+        this.#search.items = build_search_items(
+            this.project,
+            first_board(this.project),
+            index(),
+        );
+        this.#position_search();
+
+        // Keep the hint line in sync with the selection, after the card and
+        // cross-probing have reacted.
+        const later_hint = () => window.setTimeout(() => this.#update_hint());
+        for (const v of [sv, bv]) {
+            if (v) {
+                this.#workspace_listeners.push(
+                    v.addEventListener(KiCanvasSelectEvent.type, later_hint),
+                    v.addEventListener(KiCanvasNetSelectEvent.type, later_hint),
+                );
+            }
+        }
+        this.#update_hint();
+
         // Show the part info card for the clicked part. When cross-probing
         // selects the part in the other view too, the card just stays.
         const card = this.#part_info;
@@ -320,6 +535,8 @@ class KiCanvasShellElement extends KCUIElement {
     override render() {
         this.#part_info =
             html`<kc-part-info></kc-part-info>` as KCPartInfoElement;
+        this.#search =
+            html`<kc-search-box></kc-search-box>` as KCSearchBoxElement;
 
         this.#schematic_app = html`
             <kc-schematic-app controls="floating"></kc-schematic-app>
@@ -405,7 +622,8 @@ class KiCanvasShellElement extends KCUIElement {
                     <div class="pane left">${this.#schematic_app}</div>
                     <kc-ui-divider storage-key="workspace"></kc-ui-divider>
                     <div class="pane right">${this.#board_app}</div>
-                    ${this.#part_info}
+                    ${this.#part_info} ${this.#search}
+                    <div class="hint" role="status"></div>
                 </main>
             </kc-ui-app>
         `;

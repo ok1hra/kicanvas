@@ -29,9 +29,10 @@ export class Preferences extends EventTarget {
         this.theme = themes.by_name(
             this.storage.get("theme", themes.default.name),
         );
+        // Scroll to zoom, shift/ctrl+scroll to pan, like KiCad.
         this.alignControlsWithKiCad = this.storage.get(
             "alignControlsWithKiCad",
-            false,
+            true,
         );
     }
 }

@@ -186,3 +186,33 @@ kc-schematic-app {
     height: 100%;
     flex: 1;
 }
+
+/* One line hint along the bottom of the page, below both panes. */
+:host([loaded]) main {
+    padding-bottom: 20px;
+}
+
+main > .hint {
+    position: absolute;
+    z-index: 25;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 20px;
+    padding: 0 10px;
+    font-size: 11px;
+    line-height: 20px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #cfcfcf;
+    background: #2b2b2d;
+    border-top: 1px solid #444;
+    pointer-events: none;
+    user-select: none;
+}
+
+:host(:not([loaded])) main > .hint {
+    display: none;
+}

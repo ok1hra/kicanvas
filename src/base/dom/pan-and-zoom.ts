@@ -9,7 +9,8 @@ import { Preferences } from "../../kicanvas/preferences";
 
 const line_delta_multiplier = 8;
 const page_delta_multiplier = 24;
-const zoom_speed = 0.005;
+// About 1.25x per mouse wheel notch, like KiCad.
+const zoom_speed = 0.0095;
 const pan_speed = 1;
 
 export type PanAndZoomCallback = () => void;
@@ -208,18 +209,24 @@ export class PanAndZoom {
     }
 
     #handle_zoom(delta: number, mouse?: Vec2) {
+        // Keep the point under the mouse in place, as KiCad does.
+        const mouse_world =
+            mouse != null ? this.camera.screen_to_world(mouse) : null;
+
         this.camera.zoom *= Math.exp(delta * -zoom_speed);
         this.camera.zoom = Math.min(
             this.max_zoom,
             Math.max(this.camera.zoom, this.min_zoom),
         );
 
-        if (mouse != null) {
-            const mouse_world = this.camera.screen_to_world(mouse);
+        if (mouse != null && mouse_world) {
             const new_world = this.camera.screen_to_world(mouse);
-            const center_delta = mouse_world.sub(new_world);
-
-            this.camera.translate(center_delta);
+            const d = mouse_world.sub(new_world);
+            // translate() mirrors x for flipped views; this is already a
+            // world space delta.
+            this.camera.translate(
+                this.camera.flipped ? new Vec2(-d.x, d.y) : d,
+            );
         }
 
         if (this.callback) {

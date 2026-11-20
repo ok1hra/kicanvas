@@ -219,10 +219,9 @@ export class KCUIFloatingPanelElement extends KCUIElement {
     override connectedCallback() {
         super.connectedCallback();
 
+        // Only the position is restored; whether the panel starts collapsed
+        // is up to whoever creates it.
         const state = load_state<PanelState>(this.#state_key);
-        if (state.collapsed !== undefined) {
-            this.collapsed = state.collapsed;
-        }
         if (state.left !== undefined && state.top !== undefined) {
             // Wait for layout so the parent's size is known.
             window.requestAnimationFrame(() =>

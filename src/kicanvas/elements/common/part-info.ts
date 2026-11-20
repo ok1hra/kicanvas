@@ -6,7 +6,12 @@
 
 import { attribute, css, html } from "../../../base/web-components";
 import { KCUIElement } from "../../../kc-ui";
-import { datasheet_href, key_fields, type PartInfo } from "../../part-info";
+import {
+    datasheet_href,
+    factorify_href,
+    key_fields,
+    type PartInfo,
+} from "../../part-info";
 
 /**
  * A small card with a part's key metadata (ID, datasheet, part_value),
@@ -182,9 +187,20 @@ export class KCPartInfoElement extends KCUIElement {
         this.update();
     }
 
+    static hidden_event = "kicanvas:part-info-hidden";
+
     hide() {
+        const was_open = this.open;
         this.open = false;
         this.#info = undefined;
+        if (was_open) {
+            this.dispatchEvent(
+                new CustomEvent(KCPartInfoElement.hidden_event, {
+                    bubbles: true,
+                    composed: true,
+                }),
+            );
+        }
     }
 
     override initialContentCallback() {
@@ -242,15 +258,19 @@ export class KCPartInfoElement extends KCUIElement {
     }
 
     #value(name: string, value: string | undefined) {
-        if (name.toLowerCase() == "datasheet") {
-            const href = datasheet_href(value);
-            if (href) {
-                return html`<span class="val"
-                    ><a href="${href}" target="_blank" rel="noopener noreferrer"
-                        >${value}</a
-                    ></span
-                >`;
-            }
+        const lower = name.toLowerCase();
+        const href =
+            lower == "datasheet"
+                ? datasheet_href(value)
+                : lower == "id"
+                  ? factorify_href(value)
+                  : undefined;
+        if (href) {
+            return html`<span class="val"
+                ><a href="${href}" target="_blank" rel="noopener noreferrer"
+                    >${value}</a
+                ></span
+            >`;
         }
         if (!value || value == "~") {
             return html`<span class="val empty">—</span>`;
@@ -277,6 +297,8 @@ export class KCPartInfoElement extends KCUIElement {
             ? info.fields
                   .filter(
                       (f) =>
+                          // Already shown: in the header and the key rows.
+                          f.name != "Reference" &&
                           !key_fields.some(
                               (k) => k.toLowerCase() == f.name.toLowerCase(),
                           ),

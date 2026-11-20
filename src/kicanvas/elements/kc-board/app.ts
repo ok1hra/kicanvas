@@ -6,6 +6,8 @@
 
 import { html } from "../../../base/web-components";
 import { KicadPCB } from "../../../kicad";
+import type { KCUIButtonElement } from "../../../kc-ui";
+import { KiCanvasLayersChangedEvent } from "../../../viewers/base/events";
 import type { BoardViewer } from "../../../viewers/board/viewer";
 import type { ProjectPage } from "../../project";
 import { KCViewerAppElement } from "../common/app";
@@ -16,6 +18,7 @@ import "../common/help-panel";
 import "../common/preferences-panel";
 import "../common/viewer-bottom-toolbar";
 import "./appearance-panel";
+import { KCBoardMeasureElement } from "./measure";
 import "./footprints-panel";
 import "./info-panel";
 import "./layers-panel";
@@ -32,7 +35,8 @@ import "./viewer";
 export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> {
     override on_viewer_select(item?: unknown, previous?: unknown) {
         // Selecting the same item twice should show the properties panel.
-        if (item && item == previous) {
+        // In floating mode the part info card already shows them.
+        if (item && item == previous && !this.floating) {
             this.change_activity("properties");
         }
     }
@@ -53,13 +57,102 @@ export class KCBoardAppElement extends KCViewerAppElement<KCBoardViewerElement> 
         await super.load(src);
         if (this.floating && this.current_page == src) {
             // Start with just copper and the board outline, which is what
-            // matters most when cross-checking against the schematic.
-            (this.viewer as BoardViewer).show_copper_layers_only();
+            // matters most when cross-checking against the schematic, and
+            // zone outlines instead of fills so the traces are visible.
+            const viewer = this.viewer as BoardViewer;
+            viewer.show_copper_layers_only();
+            viewer.zone_fills = false;
         }
     }
 
     protected override get menu_heading() {
         return "Board";
+    }
+
+    protected override get show_coordinates() {
+        return true;
+    }
+
+    #measure?: KCBoardMeasureElement;
+
+    protected override make_overlays() {
+        this.#measure =
+            html`<kc-board-measure></kc-board-measure>` as KCBoardMeasureElement;
+        // Keep the button in sync, also when toggled with the keyboard.
+        this.#measure.addEventListener(
+            KCBoardMeasureElement.change_event,
+            (e) => {
+                const button = this.#button("measure");
+                if (button) {
+                    button.selected = (e as CustomEvent<boolean>).detail;
+                }
+            },
+        );
+        return [this.#measure];
+    }
+
+    protected override make_bottom_buttons() {
+        return [
+            html`<kc-ui-button
+                slot="left"
+                variant="toolbar"
+                name="measure"
+                title="Measure distances and angles (M)"
+                icon="straighten">
+            </kc-ui-button>`,
+            html`<kc-ui-button
+                slot="right"
+                variant="toolbar"
+                name="zone_fills"
+                title="Zone fills"
+                icon="format_color_fill">
+            </kc-ui-button>`,
+            html`<kc-ui-button
+                slot="right"
+                variant="toolbar"
+                name="flip_view"
+                title="Flip board view"
+                icon="flip">
+            </kc-ui-button>`,
+        ];
+    }
+
+    #button(name: string) {
+        return this.renderRoot.querySelector(
+            `kc-ui-button[name="${name}"]`,
+        ) as KCUIButtonElement | null;
+    }
+
+    protected override on_button(name: string, button: KCUIButtonElement) {
+        const viewer = this.viewer as BoardViewer;
+        switch (name) {
+            case "zone_fills":
+                viewer.zone_fills = !viewer.zone_fills;
+                return true;
+            case "measure":
+                this.#measure?.toggle();
+                return true;
+        }
+        return false;
+    }
+
+    override initialContentCallback() {
+        super.initialContentCallback();
+        // Keep the zone fill button in sync, also when changed from the
+        // layers menu.
+        this.addDisposable(
+            this.viewer.addEventListener(
+                KiCanvasLayersChangedEvent.type,
+                () => {
+                    const button = this.#button("zone_fills");
+                    if (button) {
+                        button.selected = (
+                            this.viewer as BoardViewer
+                        ).zone_fills;
+                    }
+                },
+            ),
+        );
     }
 
     protected override get menu_anchor(): "left" | "right" {

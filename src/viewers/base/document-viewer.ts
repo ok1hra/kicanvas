@@ -146,6 +146,15 @@ export abstract class DocumentViewer<
     }
 
     /**
+     * Zooms to fit the design (the board outline or a sheet's content),
+     * like when it was opened. The fit is kept when the canvas is resized.
+     */
+    zoom_to_fit() {
+        this.zoom_to_initial_view();
+        this.viewport.user_moved_camera = false;
+    }
+
+    /**
      * Positions the camera when a document is first loaded. Defaults to
      * showing the whole page; subclasses can override this to show something
      * more relevant (e.g. the board outline).
