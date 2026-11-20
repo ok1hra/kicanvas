@@ -130,4 +130,34 @@ suite("workspace: kc-ui elements", function () {
             section.remove();
         }
     });
+
+    test("updating twice at once renders the content once", async function () {
+        const section = document.createElement(
+            "kc-ui-floating-section",
+        ) as KCUIFloatingSectionElement;
+        section.setAttribute("heading", "Layers");
+        document.body.append(section);
+
+        try {
+            for (let i = 0; i < 100; i++) {
+                if (section.shadowRoot?.querySelector(".head")) {
+                    break;
+                }
+                await new Promise((r) => setTimeout(r, 10));
+            }
+            // E.g. a part card shown for the board and, through
+            // cross-probing, for the schematic in the same tick.
+            // (The promises wait for an animation frame, which doesn't run in
+            // background tabs; the content is there after a microtask.)
+            void section.update();
+            void section.update();
+            await new Promise((r) => setTimeout(r, 20));
+            assert.equal(
+                section.shadowRoot!.querySelectorAll(".head").length,
+                1,
+            );
+        } finally {
+            section.remove();
+        }
+    });
 });

@@ -26,6 +26,7 @@ import { Project } from "../project";
 import { KCPartInfoElement } from "./common/part-info";
 import { KCSearchBoxElement } from "./common/search-box";
 import { build_search_items, type SearchItem } from "../search";
+import { decode_view, encode_view, type ViewState } from "../share";
 import { KCUIDividerElement } from "../../kc-ui";
 import { GitHubFileSystem } from "../services/github-vfs";
 import { CodebergFileSystem } from "../services/codeberg-vfs";
@@ -217,6 +218,170 @@ class KiCanvasShellElement extends KCUIElement {
         this.#update_hint();
     }
 
+    #schematic_viewer() {
+        return this.project.has_schematics
+            ? (this.#schematic_app.viewer as SchematicViewer | undefined)
+            : undefined;
+    }
+
+    #board_viewer() {
+        return this.project.has_boards
+            ? (this.#board_app.viewer as BoardViewer | undefined)
+            : undefined;
+    }
+
+    /** What's shown now, for a shared link. */
+    #view_state(): ViewState {
+        const sv = this.#schematic_viewer();
+        const bv = this.#board_viewer();
+        const state: ViewState = {};
+        if (sv?.document) {
+            state.sheet = this.#schematic_app.current_page?.project_path;
+            state.sch = sv.viewport.camera.bbox;
+        }
+        if (bv?.document) {
+            state.board = bv.viewport.camera.bbox;
+            state.flip = bv.viewport.camera.flipped;
+        }
+        const cp = this.#cross_probe;
+        if (cp?.part) {
+            state.part = cp.part.reference;
+        } else if (cp?.net_keys.length) {
+            state.nets = [...cp.net_keys];
+        } else if (bv?.highlighted_nets.length) {
+            state.nets = bv.highlighted_nets.map(
+                (n) => bv.board.get_netname_by_number(n) ?? "",
+            );
+        } else if (bv?.selected?.context instanceof Footprint) {
+            state.part = bv.selected.context.reference;
+        }
+        return state;
+    }
+
+    /**
+     * Copies a link to the current view (sheet, zoom, selection and
+     * highlighted nets) and puts it in the address bar.
+     */
+    async #share() {
+        const url = new URL(window.location.href);
+        url.hash = encode_view(this.#view_state());
+        window.history.replaceState(null, "", url);
+
+        const popup = this.renderRoot.querySelector<HTMLElement>(
+            "main .center-bar .share-popup",
+        )!;
+        const input = popup.querySelector("input")!;
+        const msg = popup.querySelector(".msg")!;
+        input.value = url.href;
+
+        let copied = false;
+        try {
+            await navigator.clipboard.writeText(url.href);
+            copied = true;
+        } catch {
+            // No clipboard access (e.g. not a secure context).
+        }
+        msg.textContent = copied
+            ? "Link copied to the clipboard"
+            : "Copy this link:";
+        popup.hidden = false;
+        input.focus();
+        input.select();
+
+        window.clearTimeout(this.#share_timer);
+        const close = (e?: Event) => {
+            if (e && e.composedPath().includes(popup)) {
+                return;
+            }
+            popup.hidden = true;
+            window.removeEventListener("pointerdown", close, true);
+            window.removeEventListener("keydown", on_key, true);
+        };
+        const on_key = (e: KeyboardEvent) => {
+            if (e.key == "Escape" || e.key == "Enter") {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                close();
+            }
+        };
+        window.addEventListener("pointerdown", close, true);
+        window.addEventListener("keydown", on_key, true);
+        if (copied) {
+            this.#share_timer = window.setTimeout(() => close(), 5000);
+        }
+    }
+
+    #share_timer = 0;
+
+    /** Shows the view from a shared link, see #share(). */
+    async #restore_view(state: ViewState) {
+        const sv = this.#schematic_viewer();
+        const bv = this.#board_viewer();
+        await Promise.all([sv?.loaded, bv?.loaded]);
+
+        // The sheet first, then the selection, then the zoom (which the
+        // selection would change).
+        const page = state.sheet
+            ? this.project.page_by_path(state.sheet)
+            : undefined;
+        if (sv && page && this.#schematic_app.current_page != page) {
+            await new Promise<void>((resolve) => {
+                const once = sv.addEventListener(KiCanvasLoadEvent.type, () => {
+                    once.dispose();
+                    resolve();
+                });
+                this.project.set_active_page(page);
+            });
+        }
+
+        const fp = state.part
+            ? bv?.board.find_footprint(state.part)
+            : undefined;
+        if (fp && bv) {
+            // Show the part's card in the middle of the board.
+            const right =
+                this.renderRoot.querySelector<HTMLElement>("main > .right");
+            if (right) {
+                this.#last_pointer = {
+                    x: right.offsetLeft + right.offsetWidth / 2,
+                    y: right.offsetHeight / 2,
+                };
+            }
+            if (this.#cross_probe) {
+                this.#cross_probe.show_part(fp);
+            } else {
+                bv.select(fp);
+            }
+        } else if (state.nets?.length) {
+            if (this.#cross_probe) {
+                this.#cross_probe.show_nets(state.nets);
+            } else {
+                bv?.highlight_nets(state.nets);
+            }
+        }
+
+        // Wait for the views to have their final size.
+        await new Promise((r) => window.setTimeout(r, 100));
+        if (bv && state.flip != bv.viewport.camera.flipped) {
+            bv.flip_view();
+            const flip = this.#board_app.button("flip_view");
+            if (flip) {
+                flip.selected = bv.viewport.camera.flipped;
+            }
+        }
+        for (const [viewer, bbox] of [
+            [sv, state.sch],
+            [bv, state.board],
+        ] as const) {
+            if (viewer && bbox) {
+                viewer.viewport.camera.bbox = bbox;
+                viewer.viewport.user_moved_camera = true;
+                viewer.draw();
+            }
+        }
+        this.#update_hint();
+    }
+
     constructor() {
         super();
         this.provideContext("project", this.project);
@@ -280,6 +445,11 @@ class KiCanvasShellElement extends KCUIElement {
         workspace.addEventListener(KCSearchBoxElement.pick_event, (e) =>
             this.#on_search_pick((e as CustomEvent<SearchItem>).detail),
         );
+        const share = this.renderRoot.querySelector(
+            "main .center-bar button[name=share]",
+        )!;
+        share.addEventListener("click", () => this.#share());
+
         workspace.addEventListener(KCSearchBoxElement.focus_event, (e) => {
             const focused = (e as CustomEvent<boolean>).detail;
             window.dispatchEvent(
@@ -587,6 +757,14 @@ class KiCanvasShellElement extends KCUIElement {
                 ),
             );
         }
+
+        // Opened from a shared link.
+        const shared = decode_view(window.location.hash);
+        if (shared) {
+            this.#restore_view(shared).catch((e) =>
+                console.error("Couldn't restore the shared view", e),
+            );
+        }
     }
 
     override render() {
@@ -682,7 +860,23 @@ class KiCanvasShellElement extends KCUIElement {
                     ${this.#part_info}
                     <div class="center-bar">
                         <div class="tools left"></div>
-                        ${this.#search}
+                        <div class="middle">
+                            ${this.#search}
+                            <div class="actions">
+                                <button
+                                    type="button"
+                                    class="pill"
+                                    name="share"
+                                    title="Copy a link that opens this view: sheet, zoom and highlight">
+                                    <kc-ui-icon>share</kc-ui-icon>
+                                    Share
+                                </button>
+                            </div>
+                            <div class="share-popup" hidden>
+                                <span class="msg"></span>
+                                <input type="text" readonly />
+                            </div>
+                        </div>
                         <div class="tools right"></div>
                     </div>
                     <div class="status" role="status">

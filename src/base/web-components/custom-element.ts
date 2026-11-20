@@ -91,10 +91,13 @@ export class CustomElement extends HTMLElement {
 
     async update() {
         this.updateComplete = new DeferredPromise<boolean>();
+        const content = await this.render();
+        // Clear right before adding the new content: if update() is called
+        // again before this one finishes, the old content must not stay.
         while (this.renderRoot.firstChild) {
             this.renderRoot.firstChild.remove();
         }
-        this.renderRoot.appendChild(await this.render());
+        this.renderRoot.appendChild(content);
         this.renderedCallback();
         window.requestAnimationFrame(() => {
             this.updateComplete.resolve(true);

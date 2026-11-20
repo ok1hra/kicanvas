@@ -5,11 +5,12 @@
 */
 
 import { assert } from "chai";
-import { Vec2 } from "../../src/base/math";
+import { BBox, Vec2 } from "../../src/base/math";
 import { KicadPCB, KicadSch } from "../../src/kicad";
 import { CrossProbeIndex } from "../../src/kicanvas/cross-probe";
 import { PartInfo } from "../../src/kicanvas/part-info";
 import { Project } from "../../src/kicanvas/project";
+import { decode_view, encode_view } from "../../src/kicanvas/share";
 import { LocalFileSystem } from "../../src/kicanvas/services/vfs";
 import { pick_board } from "../../src/viewers/board/picking";
 import {
@@ -287,5 +288,34 @@ suite("part info rows", function () {
             ["On stock", false],
             ["On order", false],
         ]);
+    });
+});
+
+suite("shared links", function () {
+    test("view state survives the URL", function () {
+        const state = {
+            sheet: "mcu.kicad_sch:/a/b",
+            sch: new BBox(10.5, -20.25, 100, 60.125),
+            board: new BBox(0, 0, 50.5, 25),
+            flip: true,
+            nets: ["/MCU/LCD_DSI.CKP", "GND,odd name"],
+        };
+        const decoded = decode_view(`#${encode_view(state)}`)!;
+        assert.equal(decoded.sheet, state.sheet);
+        assert.deepEqual(
+            [decoded.sch!.x, decoded.sch!.y, decoded.sch!.w, decoded.sch!.h],
+            [10.5, -20.25, 100, 60.125],
+        );
+        assert.equal(decoded.board!.w, 50.5);
+        assert.isTrue(decoded.flip);
+        assert.deepEqual(decoded.nets, state.nets);
+        assert.isUndefined(decoded.part);
+    });
+
+    test("links without a view", function () {
+        assert.isNull(decode_view(""));
+        assert.isNull(decode_view("#"));
+        assert.isNull(decode_view("#s=1,2,nope,4"));
+        assert.equal(decode_view("#part=U5")!.part, "U5");
     });
 });

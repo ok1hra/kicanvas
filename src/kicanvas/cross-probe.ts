@@ -559,6 +559,31 @@ export class CrossProbe implements IDisposable {
         return this.#state?.kind == "nets" ? this.#state.keys : [];
     }
 
+    /** The probed part, if a part is probed. */
+    get part(): Footprint | undefined {
+        return this.#state?.kind == "footprint"
+            ? this.#state.footprint
+            : undefined;
+    }
+
+    /**
+     * Selects a part in both views, without switching sheets. Used to
+     * restore a shared view.
+     */
+    show_part(footprint: Footprint) {
+        this.#guard(() => {
+            this.#state = { kind: "footprint", footprint };
+            this.board_viewer.select(footprint);
+            this.#apply_to_schematic(true);
+            this.#announce_pages();
+        });
+    }
+
+    /** Highlights nets (by key) in both views, without zooming. */
+    show_nets(keys: string[]) {
+        this.#guard(() => this.#set_nets(keys, {}));
+    }
+
     constructor(
         public project: Project,
         public schematic_viewer: SchematicViewer,
@@ -665,7 +690,8 @@ export class CrossProbe implements IDisposable {
             if (fp) {
                 this.#state = { kind: "footprint", footprint: fp };
                 this.board_viewer.select(fp);
-                this.board_viewer.ensure_visible(fp.bbox);
+                // Show the part with its surroundings.
+                this.board_viewer.zoom_to_item(fp.bbox);
                 this.#announce_pages();
                 return;
             }

@@ -264,6 +264,91 @@ main > .center-bar .tools {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
+main > .center-bar .middle {
+    position: relative;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+main > .center-bar .middle > *,
+main > .center-bar .actions > * {
+    pointer-events: auto;
+}
+
+main > .center-bar .actions {
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+main > .center-bar button.pill {
+    all: unset;
+    /* "all: unset" would inherit "none" from the container. */
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 10px 0 7px;
+    font-size: 11px;
+    color: #d0d0d0;
+    background: rgba(40, 40, 42, 0.97);
+    border: 1px solid #5a5a5a;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+    user-select: none;
+}
+
+main > .center-bar button.pill kc-ui-icon {
+    font-size: 14px;
+}
+
+main > .center-bar button.pill:hover {
+    background: #48484b;
+    color: #fff;
+}
+
+main > .center-bar button.pill[selected] {
+    background: #2f5d8a;
+    border-color: #4a86c5;
+    color: #fff;
+}
+
+main > .center-bar .share-popup {
+    position: absolute;
+    top: 56px;
+    width: 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #e4e4e4;
+    background: rgba(40, 40, 42, 0.98);
+    border: 1px solid #575757;
+    border-radius: 4px;
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
+}
+
+main > .center-bar .share-popup[hidden] {
+    display: none;
+}
+
+main > .center-bar .share-popup input {
+    font: inherit;
+    color: #e4e4e4;
+    background: #222224;
+    border: 1px solid #575757;
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+
 main > .center-bar .tools.left {
     justify-self: end;
 }
