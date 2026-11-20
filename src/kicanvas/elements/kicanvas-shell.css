@@ -251,6 +251,11 @@ main > kc-ui-floating-panel.revision {
     --floating-panel-width: 290px;
 }
 
+/* Comparing has its own exports. */
+:host([comparing]) main > .center-bar button[name="llm_export"] {
+    display: none;
+}
+
 main > kc-ui-floating-panel.revision[hidden],
 :host([comparing]) main > kc-ui-floating-panel.revision {
     display: none;

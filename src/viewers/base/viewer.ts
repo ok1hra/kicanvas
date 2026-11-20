@@ -250,6 +250,17 @@ export abstract class Viewer extends EventTarget {
         }
     }
 
+    /**
+     * Draws right away rather than on the next animation frame, e.g. to
+     * read the canvas into an image (WebGL canvases are only readable
+     * right after drawing).
+     */
+    public render_now() {
+        if (this.viewport) {
+            this.on_draw();
+        }
+    }
+
     public draw() {
         if (!this.viewport) {
             return;

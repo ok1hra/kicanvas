@@ -13,7 +13,7 @@ import { sprites_url } from "../icons/sprites";
 import type { BoardViewer } from "../../viewers/board/viewer";
 import type { SchematicViewer } from "../../viewers/schematic/viewer";
 import { Footprint, KicadPCB } from "../../kicad/board";
-import { SchematicSymbol } from "../../kicad/schematic";
+import { KicadSch, SchematicSymbol } from "../../kicad/schematic";
 import {
     KiCanvasLoadEvent,
     KiCanvasMouseMoveEvent,
@@ -35,6 +35,10 @@ import {
     type Commit,
 } from "../compare/revisions";
 import { KCRevisionListElement } from "./common/revision-list";
+import { render_llm_images } from "./common/llm-images";
+import { export_board, llm_export_texts } from "../llm-export";
+import { download_blob } from "../compare/report";
+import { zip } from "../../base/zip";
 import type { KCUIFloatingPanelElement } from "../../kc-ui";
 import {
     KCCompareWorkspaceElement,
@@ -169,9 +173,9 @@ class KiCanvasShellElement extends KCUIElement {
 
         // The revision palette starts below the Compare button.
         const panel = this.#revision_panel;
-        const compare = bar.querySelector<HTMLElement>("button[name=compare]");
-        if (panel && !panel.hidden && !panel.placed && compare) {
-            const r = compare.getBoundingClientRect();
+        const actions = bar.querySelector<HTMLElement>(".actions");
+        if (panel && !panel.hidden && !panel.placed && actions) {
+            const r = actions.getBoundingClientRect();
             const m = main.getBoundingClientRect();
             panel.move_to(
                 r.left + r.width / 2 - m.left - panel.offsetWidth / 2,
@@ -495,6 +499,87 @@ class KiCanvasShellElement extends KCUIElement {
         this.#update_hint();
     }
 
+    #exporting = false;
+
+    /**
+     * Downloads the design summarized for an LLM, see llm-export.ts, with
+     * images of the sheets and the board.
+     */
+    async #export_for_llm() {
+        if (this.#exporting || !this.loaded) {
+            return;
+        }
+        this.#exporting = true;
+        const button = this.renderRoot.querySelector<HTMLElement>(
+            "main .center-bar button[name=llm_export]",
+        )!;
+        const label = button.querySelector(".label")!;
+        button.setAttribute("selected", "");
+        const hint = (text: string | null) =>
+            window.dispatchEvent(
+                new CustomEvent(KiCanvasShellElement.hint_event, {
+                    detail: { source: "llm-export", text },
+                }),
+            );
+        const shown = this.#schematic_app?.current_page;
+
+        try {
+            const c = this.#commits.find((c) => c.sha == this.#revision);
+            const revision =
+                this.#revision == WORKTREE
+                    ? "working copy (the files on disk)"
+                    : c
+                      ? `${c.short} (${c.date.slice(0, 10)}) “${c.subject}”`
+                      : this.#revision;
+
+            const board = export_board(this.project);
+            const images = await render_llm_images(
+                this.project,
+                board,
+                (done, total) => {
+                    label.textContent = `Exporting… ${done}/${total}`;
+                    hint(
+                        `Exporting for an LLM: drawing the sheets and the board (${done} of ${total})`,
+                    );
+                },
+            );
+            hint("Exporting for an LLM: writing the summary");
+            await new Promise((r) => window.setTimeout(r));
+            const texts = llm_export_texts(this.project, revision, images);
+            const folder = `${this.project.name || "design"}-llm`.replace(
+                /[^\w.-]+/g,
+                "_",
+            );
+            const archive = await zip([
+                ...texts.map((t) => ({
+                    name: `${folder}/${t.name}`,
+                    data: t.text,
+                })),
+                ...images.map((i) => ({
+                    name: `${folder}/${i.name}`,
+                    data: i.blob,
+                })),
+            ]);
+            download_blob(`${folder}.zip`, archive);
+        } catch (e) {
+            console.error("Export for an LLM failed", e);
+            hint(`Export failed: ${e}`);
+            await new Promise((r) => window.setTimeout(r, 4000));
+        } finally {
+            // The sheets were shown as each of their instances; show the
+            // viewer's sheet's instance data again.
+            if (shown?.document) {
+                (shown.document as KicadSch).update_hierarchical_data(
+                    shown.sheet_path,
+                );
+            }
+            label.textContent = "Export for LLM";
+            button.removeAttribute("selected");
+            hint(null);
+            this.#exporting = false;
+        }
+    }
+
     #compare?: KCCompareWorkspaceElement;
 
     /** Switches between viewing and comparing revisions. */
@@ -700,6 +785,9 @@ class KiCanvasShellElement extends KCUIElement {
         this.renderRoot
             .querySelector("main .center-bar button[name=compare]")!
             .addEventListener("click", () => this.#toggle_compare());
+        this.renderRoot
+            .querySelector("main .center-bar button[name=llm_export]")!
+            .addEventListener("click", () => this.#export_for_llm());
 
         workspace.addEventListener(KCSearchBoxElement.focus_event, (e) => {
             const focused = (e as CustomEvent<boolean>).detail;
@@ -1148,6 +1236,14 @@ class KiCanvasShellElement extends KCUIElement {
                                     title="Compare two revisions from the project's git history (click again to go back)">
                                     <kc-ui-icon>compare_arrows</kc-ui-icon>
                                     Compare
+                                </button>
+                                <button
+                                    type="button"
+                                    class="pill"
+                                    name="llm_export"
+                                    title="Download the design for an LLM (ZIP): parts, nets, sheets and board as text, with images of the sheets and the board">
+                                    <kc-ui-icon>smart_toy</kc-ui-icon>
+                                    <span class="label">Export for LLM</span>
                                 </button>
                             </div>
                             <div class="share-popup" hidden>

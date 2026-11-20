@@ -79,7 +79,7 @@ export type Comparison = {
 
 // Parts
 
-type Part = {
+export type Part = {
     ref: string;
     value: string;
     footprint: string;
@@ -92,7 +92,7 @@ type Part = {
 };
 
 /** Schematic pages that are part of the sheet hierarchy. */
-function hierarchy_pages(project: Project): ProjectPage[] {
+export function hierarchy_pages(project: Project): ProjectPage[] {
     return [...project.pages()].filter(
         (p) =>
             p.type == "schematic" &&
@@ -100,14 +100,14 @@ function hierarchy_pages(project: Project): ProjectPage[] {
     );
 }
 
-function first_board(project: Project): KicadPCB | undefined {
+export function first_board(project: Project): KicadPCB | undefined {
     for (const board of project.boards()) {
         return board;
     }
     return undefined;
 }
 
-function collect_parts(project: Project): Map<string, Part> {
+export function collect_parts(project: Project): Map<string, Part> {
     const parts = new Map<string, Part>();
     for (const page of hierarchy_pages(project)) {
         for (const symbol of (page.document as KicadSch).symbols.values()) {
@@ -168,7 +168,7 @@ const show = (v: string | undefined) => (v === undefined || v === "" ? "—" : v
 
 // Nets
 
-type NetInfo = {
+export type NetInfo = {
     /** Identifies the net within its revision */
     id: string;
     /** For highlighting, see CrossProbeIndex.net_key() */
@@ -177,7 +177,7 @@ type NetInfo = {
     pins: Set<string>;
 };
 
-type Netlist = {
+export type Netlist = {
     index: CrossProbeIndex;
     nets: Map<string, NetInfo>;
     /** Pin ("R1.2") to net id; unconnected pins aren't listed */
@@ -192,7 +192,7 @@ function empty_board(): KicadPCB {
     } as unknown as KicadPCB;
 }
 
-function netlist(project: Project, board?: KicadPCB): Netlist {
+export function netlist(project: Project, board?: KicadPCB): Netlist {
     const index = new CrossProbeIndex(project, board ?? empty_board());
     const nets = new Map<string, NetInfo>();
     const labels = new Map<string, string>();
