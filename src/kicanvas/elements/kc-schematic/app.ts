@@ -50,9 +50,18 @@ export class KCSchematicAppElement extends KCViewerAppElement<KCSchematicViewerE
     }
 
     #open_sheet(sheet: SchematicSheet) {
-        this.project.set_active_page(
-            `${sheet.sheetfile}:${sheet.path}/${sheet.uuid}`,
-        );
+        // The sheet's instance below the shown sheet. (The sheet's own
+        // path can be that of another instance of the shown sheet.)
+        const parent = this.current_page?.sheet_path;
+        const page =
+            (parent &&
+                this.project.page_by_sheet_path(`${parent}/${sheet.uuid}`)) ||
+            this.project.page_by_path(
+                `${sheet.sheetfile}:${sheet.path}/${sheet.uuid}`,
+            );
+        if (page) {
+            this.project.set_active_page(page);
+        }
     }
 
     /** The parent sheet of the shown sheet, if it isn't the root. */

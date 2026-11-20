@@ -20,6 +20,8 @@ export class KCSearchBoxElement extends KCUIElement {
         css`
             :host {
                 position: relative;
+                /* The results list goes over the buttons below. */
+                z-index: 2;
                 display: block;
                 width: 280px;
                 font-size: 12px;
