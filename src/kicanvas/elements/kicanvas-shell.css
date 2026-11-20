@@ -192,7 +192,7 @@ kc-schematic-app {
     padding-bottom: 20px;
 }
 
-main > .hint {
+main > .status {
     position: absolute;
     z-index: 25;
     left: 0;
@@ -200,12 +200,12 @@ main > .hint {
     bottom: 0;
     height: 20px;
     padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     font-size: 11px;
     line-height: 20px;
-    text-align: center;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     color: #cfcfcf;
     background: #2b2b2d;
     border-top: 1px solid #444;
@@ -213,6 +213,92 @@ main > .hint {
     user-select: none;
 }
 
-:host(:not([loaded])) main > .hint {
+main > .status .hint {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+main > .status .coords {
+    flex: 0 0 auto;
+    min-width: 150px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #a8a8a8;
+}
+
+:host(:not([loaded])) main > .status,
+:host(:not([loaded])) main > .center-bar {
     display: none;
+}
+
+/* The search box with the schematic's buttons on its left and the board's
+   on its right, at the top of the divider. */
+main > .center-bar {
+    position: absolute;
+    z-index: 28;
+    top: 6px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: start;
+    gap: 6px;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+main > .center-bar > * {
+    pointer-events: auto;
+}
+
+main > .center-bar .tools {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 26px;
+    padding: 0 3px;
+    background: rgba(40, 40, 42, 0.97);
+    border: 1px solid #5a5a5a;
+    border-radius: 13px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+main > .center-bar .tools.left {
+    justify-self: end;
+}
+
+main > .center-bar .tools.right {
+    justify-self: start;
+}
+
+main > .center-bar .tools[hidden],
+main > .center-bar .tools:empty {
+    visibility: hidden;
+}
+
+main > .center-bar kc-ui-button {
+    font-size: 16px;
+}
+
+main > .center-bar kc-ui-button::part(base) {
+    padding: 2px;
+    border-radius: 50%;
+    background: transparent;
+    color: #d0d0d0;
+}
+
+main > .center-bar kc-ui-button:hover::part(base) {
+    background: #48484b;
+    color: #fff;
+}
+
+main > .center-bar kc-ui-button[selected]::part(base) {
+    background: #2f5d8a;
+    color: #fff;
+}
+
+main > .center-bar kc-ui-button[disabled] {
+    opacity: 0.35;
+    pointer-events: none;
 }

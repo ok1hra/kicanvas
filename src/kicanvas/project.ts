@@ -378,6 +378,30 @@ export class Project extends EventTarget implements IDisposable {
     }
 
     /**
+     * Bus aliases, from the project file (KiCad 9 and later) and from
+     * schematics (older versions).
+     */
+    public get bus_aliases(): Map<string, string[]> {
+        const aliases = new Map<string, string[]>();
+        for (const schematic of this.schematics()) {
+            for (const alias of schematic.bus_aliases ?? []) {
+                if (alias.name) {
+                    aliases.set(alias.name, alias.members);
+                }
+            }
+        }
+        const from_settings = this.settings.schematic?.["bus_aliases"];
+        if (from_settings && typeof from_settings == "object") {
+            for (const [name, members] of Object.entries(from_settings)) {
+                if (Array.isArray(members)) {
+                    aliases.set(name, members.map(String));
+                }
+            }
+        }
+        return aliases;
+    }
+
+    /**
      * Number of sheets in the schematic hierarchy, as used for ${##}.
      */
     public get sheet_count(): number {

@@ -19,12 +19,16 @@ export class KCSearchBoxElement extends KCUIElement {
         ...KCUIElement.styles,
         css`
             :host {
-                position: absolute;
-                z-index: 28;
-                top: 6px;
+                position: relative;
+                display: block;
                 width: 280px;
-                transform: translateX(-50%);
                 font-size: 12px;
+            }
+
+            ul {
+                position: absolute;
+                left: 0;
+                right: 0;
             }
 
             input {

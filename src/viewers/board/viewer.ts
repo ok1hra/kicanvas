@@ -9,22 +9,16 @@ import { is_string } from "../../base/types";
 import { Renderer } from "../../graphics";
 import { WebGL2Renderer } from "../../graphics/webgl";
 import type { BoardTheme } from "../../kicad";
-import * as kicad_common from "../../kicad/common";
 import * as board_items from "../../kicad/board";
 import { DocumentViewer } from "../base/document-viewer";
 import {
     KiCanvasLayersChangedEvent,
     KiCanvasNetSelectEvent,
 } from "../base/events";
+import type { ChooserItem } from "../base/viewer";
 import { LayerNames, LayerSet, ViewLayer } from "./layers";
 import { BoardPainter } from "./painter";
-
-export type ContextMenuCallback = (
-    screenX: number,
-    screenY: number,
-    items: Map<string, unknown>,
-    onSelect: (item: unknown) => void,
-) => void;
+import { pick_board, type BoardHit } from "./picking";
 
 export class BoardViewer extends DocumentViewer<
     board_items.KicadPCB,
@@ -32,14 +26,8 @@ export class BoardViewer extends DocumentViewer<
     LayerSet,
     BoardTheme
 > {
-    #contextMenuCallback: ContextMenuCallback | null = null;
-
     get board(): board_items.KicadPCB {
         return this.document;
-    }
-
-    set contextMenuCallback(callback: ContextMenuCallback | null) {
-        this.#contextMenuCallback = callback;
     }
 
     protected override create_renderer(canvas: HTMLCanvasElement): Renderer {
@@ -62,57 +50,76 @@ export class BoardViewer extends DocumentViewer<
     /** Whether clicks select things; off while e.g. measuring. */
     picking_enabled = true;
 
-    protected override on_pick(
-        mouse: Vec2,
-        items: Generator<{ layer: ViewLayer; bbox: BBox }, void, unknown>,
-    ): void {
+    /**
+     * Selects what was clicked: a footprint when clicking inside of its
+     * courtyard, a net when clicking copper. When that's ambiguous (e.g. a
+     * pad: its footprint or its net), a chooser menu is shown.
+     */
+    protected override on_pick(mouse: Vec2): void {
         if (!this.picking_enabled) {
             return;
         }
-        const selectableItems = new Map<string, unknown>();
-        for (const { bbox } of items) {
-            const item = bbox.context;
-            if (item instanceof board_items.Footprint) {
-                selectableItems.set(`Footprint: ${item.reference}`, item);
-            } else if (kicad_common.isNetInfo(item)) {
-                selectableItems.set(`Net: ${item.netname}`, item);
-            } else {
-                console.log(item);
-            }
-        }
+        const layers = this.layers as LayerSet;
+        const hits = pick_board(this.board, mouse, {
+            tolerance: Math.max(0.02, 3 / this.viewport.camera.zoom),
+            flipped: this.viewport.camera.flipped,
+            is_visible: (name) => !!layers.by_name(name)?.visible,
+            zone_fills: this.zone_fills,
+        });
 
-        if (selectableItems.size === 0) {
+        if (!hits.length) {
             this.select(null);
-        } else if (selectableItems.size === 1 || !this.#contextMenuCallback) {
-            this.handleItemClick(selectableItems.values().next().value);
-        } else {
-            const { x, y } = this.viewport.camera.world_to_screen(mouse);
-            this.#contextMenuCallback(x, y, selectableItems, (selected) => {
-                this.handleItemClick(selected);
-            });
+            return;
         }
+
+        const items: ChooserItem<BoardHit>[] = hits.map((hit) =>
+            hit.kind == "footprint"
+                ? {
+                      label: hit.footprint.reference,
+                      detail: hit.footprint.value,
+                      value: hit,
+                  }
+                : {
+                      label: hit.name || `Net ${hit.net}`,
+                      detail: `net · ${hit.what}`,
+                      value: hit,
+                  },
+        );
+        this.choose("Select", items, (hit) => {
+            if (hit.kind == "footprint") {
+                this.select(hit.footprint);
+            } else {
+                this.highlight_net(hit.net, true);
+            }
+        });
     }
 
-    handleItemClick(item: unknown) {
-        if (item instanceof board_items.Footprint) {
-            this.select(item);
-        } else if (kicad_common.isNetInfo(item)) {
-            this.highlight_net(kicad_common.getNetNumber(item), true);
-        }
+    #highlighted_nets: number[] = [];
+
+    /** The number of the (first) highlighted net, if any. */
+    get highlighted_net(): number | null {
+        return this.#highlighted_nets[0] ?? null;
     }
 
-    #highlighted_net: number | null = null;
-
-    /** The number of the highlighted net, if any. */
-    get highlighted_net() {
-        return this.#highlighted_net;
+    /** Numbers of the highlighted nets. */
+    get highlighted_nets(): readonly number[] {
+        return this.#highlighted_nets;
     }
 
-    /** Bounding box of everything drawn for a net (by number or name). */
-    net_bbox(net: number | string): BBox {
+    #net_number(net: number | string): number | undefined {
         if (typeof net == "string") {
-            net = this.board.net_by_name(net)?.number ?? -1;
+            return this.board.net_by_name(net)?.number;
         }
+        return net;
+    }
+
+    /** Bounding box of everything drawn for nets (by number or name). */
+    net_bbox(nets: number | string | (number | string)[]): BBox {
+        const numbers = new Set(
+            (Array.isArray(nets) ? nets : [nets])
+                .map((n) => this.#net_number(n))
+                .filter((n): n is number => n !== undefined),
+        );
         const boxes: BBox[] = [];
         for (const layer of this.layers.in_order()) {
             for (const [item, bbox] of layer.bboxes) {
@@ -121,7 +128,7 @@ export class BoardViewer extends DocumentViewer<
                     typeof n == "number"
                         ? n
                         : (n as { number?: number } | undefined)?.number;
-                if (number === net) {
+                if (number !== undefined && numbers.has(number)) {
                     boxes.push(bbox);
                 }
             }
@@ -130,7 +137,7 @@ export class BoardViewer extends DocumentViewer<
     }
 
     override select(item: board_items.Footprint | string | BBox | null) {
-        this.#highlighted_net = null;
+        this.#highlighted_nets = [];
         // If item is a string, find the footprint by uuid or reference.
         if (is_string(item)) {
             item = this.board.find_footprint(item);
@@ -151,29 +158,40 @@ export class BoardViewer extends DocumentViewer<
      *     the highlight comes from cross-probing.
      */
     highlight_net(net: number | string | null, notify = false) {
-        if (typeof net == "string") {
-            net = this.board.net_by_name(net)?.number ?? null;
-        }
+        this.highlight_nets(net === null ? [] : [net], notify);
+    }
+
+    /**
+     * Highlights nets (by number or name), replacing any selection. Unknown
+     * names are ignored.
+     */
+    highlight_nets(nets: (number | string)[], notify = false) {
         // Net 0 means "no net".
-        this.#highlighted_net = net || null;
+        this.#highlighted_nets = [
+            ...new Set(
+                nets
+                    .map((n) => this.#net_number(n))
+                    .filter((n): n is number => !!n),
+            ),
+        ];
         this.set_selected_quietly(null);
 
         if (notify) {
+            const net = this.highlighted_net;
             this.dispatchEvent(
                 new KiCanvasNetSelectEvent({
                     net:
-                        this.#highlighted_net === null
+                        net === null
                             ? null
-                            : this.board.get_netname_by_number(
-                                  this.#highlighted_net,
-                              ),
+                            : this.board.get_netname_by_number(net),
                 }),
             );
         }
     }
 
     protected override paint_selected() {
-        const highlighting = this.#highlighted_net !== null && !this.selected;
+        const highlighting =
+            this.#highlighted_nets.length > 0 && !this.selected;
         this.#set_dimmed(highlighting);
 
         if (!highlighting) {
@@ -181,7 +199,7 @@ export class BoardViewer extends DocumentViewer<
             return;
         }
 
-        this.painter.paint_net(this.board, this.#highlighted_net!);
+        this.painter.paint_net(this.board, this.#highlighted_nets);
         // Draw the net on top of the dimmed board, like KiCad's net
         // highlighting.
         const graphics = this.layers.overlay.graphics;
@@ -266,12 +284,24 @@ export class BoardViewer extends DocumentViewer<
         this.dispatchEvent(new KiCanvasLayersChangedEvent());
     }
 
-    /** Shows only the copper layers and the board outline. */
-    show_copper_layers_only() {
+    /** Layers shown by show_default_layers(), besides copper. */
+    static default_layers: string[] = [
+        LayerNames.edge_cuts,
+        LayerNames.f_silks,
+        LayerNames.b_silks,
+        LayerNames.f_crtyd,
+        LayerNames.b_crtyd,
+    ];
+
+    /**
+     * Shows the copper layers, the board outline, and the silkscreen and
+     * courtyards of both sides; hides the rest.
+     */
+    show_default_layers() {
         for (const layer of (this.layers as LayerSet).in_ui_order()) {
             layer.visible =
                 layer.name.endsWith(".Cu") ||
-                layer.name == LayerNames.edge_cuts;
+                BoardViewer.default_layers.includes(layer.name);
         }
         this.draw();
         this.notify_layers_changed();

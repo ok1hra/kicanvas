@@ -11,6 +11,7 @@ import { no_self_recursion } from "../../base/functions";
 import { BBox, Vec2 } from "../../base/math";
 import { Color, Polygon, Polyline, Renderer } from "../../graphics";
 import {
+    KiCanvasActivateEvent,
     KiCanvasLoadEvent,
     KiCanvasMouseMoveEvent,
     KiCanvasSelectEvent,
@@ -18,6 +19,22 @@ import {
 } from "./events";
 import { ViewLayerSet } from "./view-layers";
 import { Viewport } from "./viewport";
+
+/** An entry of a chooser menu, see Viewer.chooser. */
+export type ChooserItem<T = unknown> = {
+    label: string;
+    /** Shown dimmed after the label */
+    detail?: string;
+    value: T;
+};
+
+export type ChooserCallback = (
+    client_x: number,
+    client_y: number,
+    title: string,
+    items: ChooserItem[],
+    on_choose: (value: unknown) => void,
+) => void;
 
 export abstract class Viewer extends EventTarget {
     public renderer: Renderer;
@@ -93,13 +110,69 @@ export abstract class Viewer extends EventTarget {
 
             this.disposables.add(
                 listen(this.canvas, "click", (e) => {
+                    // The camera can have moved since the last mouse move.
+                    this.on_mouse_change(e);
+                    this.last_click = { x: e.clientX, y: e.clientY };
                     const items = this.layers.query_point(this.mouse_position);
                     this.on_pick(this.mouse_position, items);
+                }),
+            );
+
+            this.disposables.add(
+                listen(this.canvas, "dblclick", (e) => {
+                    this.on_mouse_change(e);
+                    const items = this.layers.query_point(this.mouse_position);
+                    this.on_activate(this.mouse_position, items);
                 }),
             );
         }
 
         this.setup_finished.open();
+    }
+
+    /** Where the last click was, in client (window) coordinates. */
+    last_click = { x: 0, y: 0 };
+
+    /**
+     * Shows a small menu at the last click to choose between items, e.g.
+     * overlapping parts and nets, or the nets of a bus. Set by the UI;
+     * without it, the first item is chosen.
+     */
+    chooser: ChooserCallback | null = null;
+
+    /** Lets the user choose one of the items; see chooser. */
+    protected choose<T>(
+        title: string,
+        items: ChooserItem<T>[],
+        on_choose: (value: T) => void,
+    ) {
+        if (!items.length) {
+            return;
+        }
+        if (items.length == 1 || !this.chooser) {
+            on_choose(items[0]!.value);
+            return;
+        }
+        this.chooser(
+            this.last_click.x,
+            this.last_click.y,
+            title,
+            items,
+            on_choose as (value: unknown) => void,
+        );
+    }
+
+    /** Handles a double click: fires a KiCanvasActivateEvent. */
+    protected on_activate(
+        mouse: Vec2,
+        items: ReturnType<ViewLayerSet["query_point"]>,
+    ) {
+        for (const { bbox } of items) {
+            this.dispatchEvent(
+                new KiCanvasActivateEvent({ item: bbox.context }),
+            );
+            return;
+        }
     }
 
     protected on_viewport_change() {

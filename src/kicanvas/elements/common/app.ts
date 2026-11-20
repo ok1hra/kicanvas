@@ -151,9 +151,6 @@ export abstract class KCViewerAppElement<
                     this.#viewer_elm.viewer.flip_view();
                     target.selected = !target.selected;
                     break;
-                case "zoom_to_fit":
-                    // Handled by the bottom toolbar.
-                    break;
                 default:
                     if (!this.on_button(target.name ?? "", target)) {
                         console.warn("Unknown button", e);
@@ -163,24 +160,75 @@ export abstract class KCViewerAppElement<
     }
 
     /**
-     * Handles a click on one of the app's own buttons (see
-     * make_bottom_buttons()). Returns false for unknown buttons.
+     * Handles a click on one of the app's own toolbar buttons (see
+     * make_toolbar_buttons()). Returns false for unknown buttons.
      */
     protected on_button(name: string, button: KCUIButtonElement): boolean {
         return false;
     }
 
     /**
-     * Buttons for the bottom toolbar in floating mode, with slot="left" or
-     * slot="right".
+     * The app's own buttons for floating mode, besides "fit to design". The
+     * workspace shows them in a row next to the divider.
      */
-    protected make_bottom_buttons(): ElementOrFragment[] {
+    protected make_toolbar_buttons(): KCUIButtonElement[] {
         return [];
     }
 
-    /** Whether the bottom toolbar shows the mouse position. */
-    protected get show_coordinates() {
-        return false;
+    /** Creates a small toolbar button. */
+    protected toolbar_button(
+        name: string,
+        title: string,
+        icon: string,
+        selected = false,
+    ) {
+        return html`<kc-ui-button
+            variant="toolbar"
+            name="${name}"
+            title="${title}"
+            icon="${icon}"
+            selected="${selected}">
+        </kc-ui-button>` as KCUIButtonElement;
+    }
+
+    #toolbar_buttons: KCUIButtonElement[] = [];
+
+    /**
+     * Buttons in floating mode, shown by the workspace rather than over the
+     * viewer: the app's own buttons and "fit to design".
+     */
+    get toolbar_buttons(): readonly KCUIButtonElement[] {
+        return this.#toolbar_buttons;
+    }
+
+    /** One of the floating mode toolbar buttons, by name. */
+    button(name: string): KCUIButtonElement | undefined {
+        return this.#toolbar_buttons.find((b) => b.name == name);
+    }
+
+    #make_floating_toolbar() {
+        const fit = this.toolbar_button(
+            "zoom_to_fit",
+            "Fit to design",
+            "fit_screen",
+        );
+        const buttons = [...this.make_toolbar_buttons(), fit];
+        for (const button of buttons) {
+            button.addEventListener("click", (e) => {
+                e.preventDefault();
+                if (button.name == "zoom_to_fit") {
+                    (
+                        this.viewer as Viewer & { zoom_to_fit(): void }
+                    ).zoom_to_fit();
+                } else if (button.name == "flip_view") {
+                    this.viewer.flip_view();
+                    button.selected = !button.selected;
+                } else if (!this.on_button(button.name ?? "", button)) {
+                    console.warn("Unknown button", button.name);
+                }
+            });
+        }
+        this.#toolbar_buttons = buttons;
     }
 
     /** Elements drawn over the viewer in floating mode (e.g. tools). */
@@ -399,11 +447,7 @@ export abstract class KCViewerAppElement<
 
         let bottom_toolbar = null;
         if (controls == "floating") {
-            bottom_toolbar = html`<kc-viewer-bottom-toolbar
-                mode="floating"
-                coordinates="${this.show_coordinates}">
-                ${this.make_bottom_buttons()}
-            </kc-viewer-bottom-toolbar>`;
+            this.#make_floating_toolbar();
         } else if (controls != "none") {
             bottom_toolbar = html`<kc-viewer-bottom-toolbar></kc-viewer-bottom-toolbar>`;
         }

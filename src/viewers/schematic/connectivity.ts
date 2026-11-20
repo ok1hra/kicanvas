@@ -6,6 +6,8 @@
 
 import { BBox, Vec2 } from "../../base/math";
 import {
+    Bus,
+    BusEntry,
     GlobalLabel,
     HierarchicalLabel,
     KicadSch,
@@ -82,6 +84,142 @@ export class SheetNet {
     }
 }
 
+/** Bus aliases: name to member names. */
+export type BusAliases = Map<string, string[]>;
+
+/** Splits a bus group's members, e.g. "A B[0..1], ~{C}". */
+function split_members(text: string) {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (const c of text) {
+        if (c == "{" || c == "[") {
+            depth++;
+        } else if (c == "}" || c == "]") {
+            depth--;
+        }
+        if (depth == 0 && (c == " " || c == ",")) {
+            if (current) {
+                parts.push(current);
+            }
+            current = "";
+        } else {
+            current += c;
+        }
+    }
+    if (current) {
+        parts.push(current);
+    }
+    return parts;
+}
+
+const vector_re = /^(.*)\[(\d+)\.\.(\d+)\](.*)$/;
+
+/** The opening brace of a bus group, which isn't an overbar's "~{". */
+function group_brace(text: string) {
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] == "{" && text[i - 1] != "~") {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/** Whether a label's text names a bus (rather than a net). */
+export function is_bus_name(text: string, aliases?: BusAliases) {
+    return (
+        vector_re.test(text) ||
+        (group_brace(text) >= 0 && text.endsWith("}")) ||
+        !!aliases?.has(text)
+    );
+}
+
+/**
+ * The net names of a bus's members, like KiCad: "D[0..2]" is D0, D1 and
+ * D2; "USB{DP DM}" is USB.DP and USB.DM; "{SDA SCL}" is SDA and SCL; and
+ * an alias stands for its members.
+ */
+export function bus_members(
+    text: string,
+    aliases: BusAliases = new Map(),
+    depth = 0,
+): string[] {
+    if (depth > 8) {
+        return [];
+    }
+
+    const brace = group_brace(text);
+    if (brace >= 0 && text.endsWith("}")) {
+        const prefix = text.slice(0, brace);
+        const members = split_members(text.slice(brace + 1, -1)).flatMap((m) =>
+            is_bus_name(m, aliases) ? bus_members(m, aliases, depth + 1) : [m],
+        );
+        return prefix ? members.map((m) => `${prefix}.${m}`) : members;
+    }
+
+    const vector = vector_re.exec(text);
+    if (vector) {
+        const [, prefix, a, b, suffix] = vector;
+        const start = parseInt(a!, 10);
+        const end = parseInt(b!, 10);
+        const step = start <= end ? 1 : -1;
+        const names = [];
+        for (let i = start; i != end + step; i += step) {
+            names.push(`${prefix}${i}${suffix}`);
+        }
+        return names;
+    }
+
+    const alias = aliases.get(text);
+    if (alias) {
+        return alias.flatMap((m) =>
+            is_bus_name(m, aliases) ? bus_members(m, aliases, depth + 1) : [m],
+        );
+    }
+
+    return [];
+}
+
+/**
+ * Connected bus wires on a sheet, with the labels and sheet pins that name
+ * them and the bus entries that connect them to member nets.
+ */
+export class SheetBus {
+    wires: Bus[] = [];
+    entries: BusEntry[] = [];
+    labels: SheetLabel[] = [];
+    sheet_pins: SchematicSheetPin[] = [];
+
+    /** Names of the bus: the texts of its labels and sheet pins. */
+    get names(): string[] {
+        return [
+            ...new Set([
+                ...this.labels.map((l) => l.text),
+                ...this.sheet_pins.map((p) => p.name),
+            ]),
+        ];
+    }
+
+    /** The net names of the bus's members. */
+    members(aliases?: BusAliases): string[] {
+        return [...new Set(this.names.flatMap((n) => bus_members(n, aliases)))];
+    }
+
+    get bbox() {
+        const points: Vec2[] = [];
+        for (const w of this.wires) {
+            points.push(...w.pts);
+        }
+        for (const e of this.entries) {
+            points.push(e.at.position, e.at.position.add(e.size));
+        }
+        for (const l of this.labels) {
+            points.push(l.at.position);
+        }
+        return BBox.from_points(points);
+    }
+}
+
 const key = (p: Vec2) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
 
 /** Distance from p to the segment a-b */
@@ -128,6 +266,7 @@ const cache = new WeakMap<KicadSch, SheetConnectivity>();
  */
 export class SheetConnectivity {
     nets: SheetNet[] = [];
+    buses: SheetBus[] = [];
     #net_by_pin = new Map<string, SheetNet>();
 
     static for(schematic: KicadSch) {
@@ -189,6 +328,8 @@ export class SheetConnectivity {
     }
 
     constructor(public schematic: KicadSch) {
+        const { bus_labels, bus_pins } = this.#find_buses(schematic);
+
         const uf = new UnionFind();
         const at_point = new Map<string, number[]>();
         const add_point = (p: Vec2, node: number) => {
@@ -232,6 +373,10 @@ export class SheetConnectivity {
             ...schematic.global_labels,
             ...schematic.hierarchical_labels,
         ]) {
+            // Labels of buses aren't nets.
+            if (bus_labels.has(label)) {
+                continue;
+            }
             const n = add_node({ kind: "label", item: label });
             add_point(label.at.position, n);
 
@@ -266,6 +411,9 @@ export class SheetConnectivity {
 
         for (const sheet of schematic.sheets) {
             for (const pin of sheet.pins) {
+                if (bus_pins.has(pin)) {
+                    continue;
+                }
                 add_point(
                     pin.at.position,
                     add_node({ kind: "sheet_pin", item: pin }),
@@ -352,6 +500,135 @@ export class SheetConnectivity {
         });
     }
 
+    /**
+     * Groups bus wires that touch, and finds their labels, sheet pins and
+     * bus entries.
+     */
+    #find_buses(schematic: KicadSch) {
+        const bus_labels = new Set<SheetLabel>();
+        const bus_pins = new Set<SchematicSheetPin>();
+        const wires = schematic.buses ?? [];
+
+        const on_wire = (p: Vec2, wire: Bus) => {
+            for (let i = 0; i < wire.pts.length - 1; i++) {
+                if (
+                    distance_to_segment(p, wire.pts[i]!, wire.pts[i + 1]!) <
+                    0.001
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Wires that touch are one bus.
+        const uf = new UnionFind();
+        wires.forEach(() => uf.add());
+        for (let i = 0; i < wires.length; i++) {
+            for (let j = i + 1; j < wires.length; j++) {
+                const a = wires[i]!;
+                const b = wires[j]!;
+                if (
+                    a.pts.some((p) => on_wire(p, b)) ||
+                    b.pts.some((p) => on_wire(p, a))
+                ) {
+                    uf.union(i, j);
+                }
+            }
+        }
+        const by_root = new Map<number, SheetBus>();
+        const bus_of_wire = wires.map((wire, i) => {
+            const root = uf.find(i);
+            let bus = by_root.get(root);
+            if (!bus) {
+                bus = new SheetBus();
+                by_root.set(root, bus);
+                this.buses.push(bus);
+            }
+            bus.wires.push(wire);
+            return bus;
+        });
+        const bus_at = (p: Vec2) => {
+            const i = wires.findIndex((w) => on_wire(p, w));
+            return i >= 0 ? bus_of_wire[i] : undefined;
+        };
+
+        for (const label of [
+            ...schematic.net_labels,
+            ...schematic.global_labels,
+            ...schematic.hierarchical_labels,
+        ]) {
+            const bus = bus_at(label.at.position);
+            if (bus) {
+                bus.labels.push(label);
+                bus_labels.add(label);
+            } else if (is_bus_name(label.text)) {
+                // A bus label that isn't on a bus wire.
+                bus_labels.add(label);
+            }
+        }
+
+        for (const sheet of schematic.sheets) {
+            for (const pin of sheet.pins) {
+                const bus = bus_at(pin.at.position);
+                if (bus) {
+                    bus.sheet_pins.push(pin);
+                    bus_pins.add(pin);
+                } else if (is_bus_name(pin.name)) {
+                    bus_pins.add(pin);
+                }
+            }
+        }
+
+        for (const entry of schematic.bus_entries ?? []) {
+            const bus =
+                bus_at(entry.at.position) ??
+                bus_at(entry.at.position.add(entry.size));
+            bus?.entries.push(entry);
+        }
+
+        return { bus_labels, bus_pins };
+    }
+
+    /**
+     * Finds the net or bus nearest to the given point, within tolerance.
+     */
+    item_at(p: Vec2, tolerance: number): { net?: SheetNet; bus?: SheetBus } {
+        const net = this.#nearest_net(p, tolerance);
+        let bus: SheetBus | undefined;
+        let bus_distance = Infinity;
+        for (const b of this.buses) {
+            for (const wire of b.wires) {
+                for (let i = 0; i < wire.pts.length - 1; i++) {
+                    const d = distance_to_segment(
+                        p,
+                        wire.pts[i]!,
+                        wire.pts[i + 1]!,
+                    );
+                    if (d <= tolerance && d < bus_distance) {
+                        bus = b;
+                        bus_distance = d;
+                    }
+                }
+            }
+            for (const label of b.labels) {
+                const size = label.effects.font.size.y || 1.27;
+                const d = Math.max(
+                    0,
+                    label.at.position.sub(p).magnitude - size * 1.5,
+                );
+                if (d <= tolerance && d < bus_distance) {
+                    bus = b;
+                    bus_distance = d;
+                }
+            }
+        }
+        if (bus && (!net.net || bus_distance < net.distance)) {
+            return { bus };
+        }
+        return { net: net.net };
+    }
+
     /** The net a symbol's pin is connected to. */
     net_for_pin(symbol: SchematicSymbol, number: string) {
         return this.#net_by_pin.get(`${symbol.uuid}:${number}`);
@@ -363,6 +640,10 @@ export class SheetConnectivity {
      * @param tolerance - how far from the item the point can be, in mm.
      */
     net_at(p: Vec2, tolerance: number): SheetNet | undefined {
+        return this.#nearest_net(p, tolerance).net;
+    }
+
+    #nearest_net(p: Vec2, tolerance: number) {
         let best: SheetNet | undefined;
         let best_distance = Infinity;
 
@@ -402,7 +683,7 @@ export class SheetConnectivity {
             }
         }
 
-        return best;
+        return { net: best, distance: best_distance };
     }
 
     /** Nets that include any of the given sheet's pins */

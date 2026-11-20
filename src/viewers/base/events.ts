@@ -50,6 +50,13 @@ export type NetSelectDetails = {
      * schematic viewer uses SheetNet objects, the board viewer net names.
      */
     net: unknown;
+    /** Schematic: all selected nets on the sheet, e.g. of a bus. */
+    nets?: unknown[];
+    /**
+     * Schematic: names of the bus members that were selected, which can
+     * include nets that aren't on the sheet.
+     */
+    members?: string[];
 };
 
 /** The user selected a net, e.g. by clicking a wire or a track. */
@@ -58,6 +65,15 @@ export class KiCanvasNetSelectEvent extends KiCanvasEvent<NetSelectDetails> {
 
     constructor(detail: NetSelectDetails) {
         super(KiCanvasNetSelectEvent.type, detail);
+    }
+}
+
+/** An item was double clicked, e.g. a sheet to open it. */
+export class KiCanvasActivateEvent extends KiCanvasEvent<{ item: unknown }> {
+    static readonly type = "kicanvas:activate";
+
+    constructor(detail: { item: unknown }) {
+        super(KiCanvasActivateEvent.type, detail);
     }
 }
 
@@ -78,6 +94,7 @@ export interface KiCanvasEventMap {
     [KiCanvasMouseMoveEvent.type]: KiCanvasMouseMoveEvent;
     [KiCanvasLayersChangedEvent.type]: KiCanvasLayersChangedEvent;
     [KiCanvasNetSelectEvent.type]: KiCanvasNetSelectEvent;
+    [KiCanvasActivateEvent.type]: KiCanvasActivateEvent;
 }
 
 declare global {

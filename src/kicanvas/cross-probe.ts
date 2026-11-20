@@ -8,7 +8,13 @@ import { Disposables, type IDisposable } from "../base/disposable";
 import { BBox } from "../base/math";
 import type { KicadPCB } from "../kicad";
 import { Footprint } from "../kicad/board";
-import { GlobalLabel, KicadSch, SchematicSymbol } from "../kicad/schematic";
+import {
+    GlobalLabel,
+    HierarchicalLabel,
+    KicadSch,
+    SchematicSheet,
+    SchematicSymbol,
+} from "../kicad/schematic";
 import {
     KiCanvasLoadEvent,
     KiCanvasNetSelectEvent,
@@ -17,6 +23,9 @@ import {
 import type { BoardViewer } from "../viewers/board/viewer";
 import {
     SheetConnectivity,
+    bus_members,
+    type BusAliases,
+    type SheetBus,
     type SheetNet,
 } from "../viewers/schematic/connectivity";
 import type { SchematicViewer } from "../viewers/schematic/viewer";
@@ -122,8 +131,33 @@ export class CrossProbeIndex {
         return found;
     }
 
+    #groups?: NetGroups;
+
+    /** Nets across the sheet hierarchy, see NetGroups. */
+    get groups(): NetGroups {
+        if (!this.#groups) {
+            this.#groups = new NetGroups(this);
+        }
+        return this.#groups;
+    }
+
+    /**
+     * A name for the whole net (across sheets) that a net on a sheet
+     * instance is part of: the board net's name if there is one, otherwise
+     * a made up "#<n>" name.
+     */
+    net_key(page: ProjectPage, net: SheetNet): string | undefined {
+        return this.groups.key(page, net);
+    }
+
     /** The board net that a net on a sheet instance is part of. */
     board_net_for(page: ProjectPage, net: SheetNet): string | undefined {
+        const key = this.net_key(page, net);
+        return key && !NetGroups.is_made_up(key) ? key : undefined;
+    }
+
+    /** The board net of a sheet net, from its pins only. */
+    pin_net_for(page: ProjectPage, net: SheetNet): Map<string, number> {
         const counts = new Map<string, number>();
         for (const pin of net.part_pins) {
             const pad = this.footprint_for(page, pin.symbol)?.pad_by_number(
@@ -134,24 +168,11 @@ export class CrossProbeIndex {
                 counts.set(name, (counts.get(name) ?? 0) + 1);
             }
         }
-
-        if (counts.size) {
-            // If the board is out of sync with the schematic, go with the
-            // majority.
-            return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
-        }
-
-        for (const name of this.#label_net_names(page, net)) {
-            if (this.board.net_by_name(name)) {
-                return name;
-            }
-        }
-
-        return undefined;
+        return counts;
     }
 
     /** Net names KiCad would give a net from its labels and power symbols */
-    #label_net_names(page: ProjectPage, net: SheetNet) {
+    label_net_names(page: ProjectPage, net: SheetNet) {
         const names: string[] = [];
         const sheet = this.project.human_sheet_path(page.sheet_path);
         for (const symbol of net.power_symbols) {
@@ -167,29 +188,336 @@ export class CrossProbeIndex {
         return names;
     }
 
-    /** Nets on a sheet instance that are part of the given board net. */
-    sheet_nets_for(page: ProjectPage, name: string): SheetNet[] {
+    /** Nets on a sheet instance that are part of the given net (key). */
+    sheet_nets_for(page: ProjectPage, key: string): SheetNet[] {
         const conn = SheetConnectivity.for(page.document as KicadSch);
-        return conn.nets.filter((net) => this.board_net_for(page, net) == name);
+        return conn.nets.filter((net) => this.net_key(page, net) == key);
     }
 
-    /** Pages that have part of the given board net. */
-    pages_with_net(name: string): ProjectPage[] {
+    /** Pages that have part of the given net (key). */
+    pages_with_net(key: string): ProjectPage[] {
         return this.pages.filter(
-            (page) => this.sheet_nets_for(page, name).length > 0,
+            (page) => this.sheet_nets_for(page, key).length > 0,
         );
+    }
+
+    #member_keys = new Map<string, string[]>();
+
+    /**
+     * The nets (keys) of a bus member, by name: nets with a label of that
+     * name on the sheet, or on the sheets the bus continues to through
+     * sheet pins and hierarchical labels. Otherwise the board net KiCad
+     * would name after it.
+     */
+    member_keys(page: ProjectPage, member: string): string[] {
+        const cache_key = `${page.project_path}\n${member}`;
+        const cached = this.#member_keys.get(cache_key);
+        if (cached) {
+            return cached;
+        }
+
+        const keys = new Set<string>();
+        const visited = new Set<ProjectPage>();
+        const queue = [page];
+        const aliases = this.aliases;
+        while (queue.length) {
+            const p = queue.shift()!;
+            if (visited.has(p)) {
+                continue;
+            }
+            visited.add(p);
+
+            const conn = SheetConnectivity.for(p.document as KicadSch);
+            for (const net of conn.nets) {
+                if (net.labels.some((l) => l.text == member)) {
+                    const key = this.net_key(p, net);
+                    if (key) {
+                        keys.add(key);
+                    }
+                }
+            }
+
+            // Follow the buses that carry the member to other sheets.
+            for (const bus of conn.buses) {
+                if (!bus.members(aliases).includes(member)) {
+                    continue;
+                }
+                for (const pin of bus.sheet_pins) {
+                    const child = this.project.page_by_sheet_path(
+                        `${p.sheet_path}/${pin.parent.uuid}`,
+                    );
+                    if (child) {
+                        queue.push(child);
+                    }
+                }
+                if (bus.labels.some((l) => l instanceof HierarchicalLabel)) {
+                    const parent = this.#parent_page(p);
+                    if (parent) {
+                        queue.push(parent);
+                    }
+                }
+            }
+        }
+
+        if (!keys.size) {
+            const sheet = this.project.human_sheet_path(page.sheet_path);
+            for (const name of [`${sheet}${member}`, member]) {
+                if (this.board.net_by_name(name)) {
+                    keys.add(name);
+                    break;
+                }
+            }
+        }
+
+        const result = [...keys];
+        this.#member_keys.set(cache_key, result);
+        return result;
+    }
+
+    #parent_page(page: ProjectPage) {
+        const parts = page.sheet_path.split("/").filter(Boolean);
+        return parts.length > 1
+            ? this.project.page_by_sheet_path(
+                  `/${parts.slice(0, -1).join("/")}`,
+              )
+            : undefined;
+    }
+
+    /** Buses on a sheet instance with any of the given nets (keys). */
+    sheet_buses_for(page: ProjectPage, keys: Set<string>): SheetBus[] {
+        const conn = SheetConnectivity.for(page.document as KicadSch);
+        const aliases = this.aliases;
+        return conn.buses.filter((bus) =>
+            bus
+                .members(aliases)
+                .some((m) =>
+                    this.member_keys(page, m).some((k) => keys.has(k)),
+                ),
+        );
+    }
+
+    #aliases?: BusAliases;
+
+    get aliases(): BusAliases {
+        this.#aliases ??= this.project.bus_aliases;
+        return this.#aliases;
+    }
+}
+
+/**
+ * Nets across the sheet hierarchy. Nets on sheets are connected through
+ * sheet pins and hierarchical labels, global labels, power symbols and
+ * bus members, like in KiCad's netlist.
+ *
+ * Each connected group is named after the board net that most of its pins'
+ * pads are on. Groups without pins on the board are named after their
+ * labels, like KiCad would, or get a made up name.
+ */
+export class NetGroups {
+    #ids = new Map<ProjectPage, Map<SheetNet, number>>();
+    #keys: string[] = [];
+
+    static is_made_up(key: string) {
+        return key.startsWith("#");
+    }
+
+    constructor(index: CrossProbeIndex) {
+        const project = index.project;
+        const pages = index.pages;
+        const uf = new UnionFind();
+        const refs: { page: ProjectPage; net: SheetNet }[] = [];
+
+        for (const page of pages) {
+            const ids = new Map<SheetNet, number>();
+            for (const net of SheetConnectivity.for(page.document as KicadSch)
+                .nets) {
+                ids.set(net, uf.add());
+                refs.push({ page, net });
+            }
+            this.#ids.set(page, ids);
+        }
+
+        const id = (page: ProjectPage, net: SheetNet) =>
+            this.#ids.get(page)!.get(net)!;
+        const join_by = new Map<string, number>();
+        const join = (name: string, n: number) => {
+            const other = join_by.get(name);
+            if (other === undefined) {
+                join_by.set(name, n);
+            } else {
+                uf.union(other, n);
+            }
+        };
+
+        for (const { page, net } of refs) {
+            const n = id(page, net);
+            for (const label of net.labels) {
+                if (label instanceof GlobalLabel) {
+                    join(`global:${label.text}`, n);
+                }
+            }
+            for (const pin of net.pins) {
+                if (pin.symbol.lib_symbol.power && pin.type == "power_in") {
+                    join(`global:${pin.symbol.value}`, n);
+                }
+            }
+        }
+
+        // Sheet pins connect to the hierarchical labels in the sheet.
+        const aliases = index.aliases;
+        for (const page of pages) {
+            const doc = page.document as KicadSch;
+            const conn = SheetConnectivity.for(doc);
+            for (const sheet of doc.sheets) {
+                const child = project.page_by_sheet_path(
+                    `${page.sheet_path}/${sheet.uuid}`,
+                );
+                const child_ids = child && this.#ids.get(child);
+                if (!child || !child_ids) {
+                    continue;
+                }
+                const child_conn = SheetConnectivity.for(
+                    child.document as KicadSch,
+                );
+                for (const net of conn.nets_for_sheet(sheet)) {
+                    for (const pin of net.sheet_pins) {
+                        if (pin.parent != sheet) {
+                            continue;
+                        }
+                        for (const child_net of child_conn.nets) {
+                            if (
+                                child_net.labels.some(
+                                    (l) =>
+                                        l instanceof HierarchicalLabel &&
+                                        l.text == pin.name,
+                                )
+                            ) {
+                                uf.union(id(page, net), id(child, child_net));
+                            }
+                        }
+                    }
+                }
+
+                // Bus pins connect the bus members on both sides.
+                for (const bus of conn.buses) {
+                    for (const pin of bus.sheet_pins) {
+                        if (pin.parent != sheet) {
+                            continue;
+                        }
+                        for (const member of bus_members(pin.name, aliases)) {
+                            const here = conn.nets.filter((n) =>
+                                n.labels.some((l) => l.text == member),
+                            );
+                            const there = child_conn.nets.filter((n) =>
+                                n.labels.some((l) => l.text == member),
+                            );
+                            for (const a of here) {
+                                for (const b of there) {
+                                    uf.union(id(page, a), id(child, b));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Name the groups.
+        const members = new Map<
+            number,
+            { page: ProjectPage; net: SheetNet }[]
+        >();
+        for (const ref of refs) {
+            const root = uf.find(id(ref.page, ref.net));
+            members.set(root, [...(members.get(root) ?? []), ref]);
+        }
+        const key_by_root = new Map<number, string>();
+        for (const [root, list] of members) {
+            key_by_root.set(root, NetGroups.#name(index, list, root));
+        }
+        for (const ref of refs) {
+            const n = id(ref.page, ref.net);
+            this.#keys[n] = key_by_root.get(uf.find(n))!;
+        }
+    }
+
+    static #name(
+        index: CrossProbeIndex,
+        list: { page: ProjectPage; net: SheetNet }[],
+        root: number,
+    ) {
+        const counts = new Map<string, number>();
+        for (const { page, net } of list) {
+            for (const [name, count] of index.pin_net_for(page, net)) {
+                counts.set(name, (counts.get(name) ?? 0) + count);
+            }
+        }
+        if (counts.size) {
+            // If the board is out of sync with the schematic, go with the
+            // majority.
+            return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+        }
+
+        // Labels on higher level sheets name the net.
+        const by_depth = [...list].sort(
+            (a, b) => a.page.sheet_path.length - b.page.sheet_path.length,
+        );
+        for (const { page, net } of by_depth) {
+            for (const name of index.label_net_names(page, net)) {
+                if (index.board.net_by_name(name)) {
+                    return name;
+                }
+            }
+        }
+
+        return `#${root}`;
+    }
+
+    key(page: ProjectPage, net: SheetNet): string | undefined {
+        const n = this.#ids.get(page)?.get(net);
+        return n === undefined ? undefined : this.#keys[n];
+    }
+}
+
+class UnionFind {
+    parent: number[] = [];
+
+    add() {
+        this.parent.push(this.parent.length);
+        return this.parent.length - 1;
+    }
+
+    find(a: number): number {
+        while (this.parent[a] != a) {
+            this.parent[a] = this.parent[this.parent[a]!]!;
+            a = this.parent[a]!;
+        }
+        return a;
+    }
+
+    union(a: number, b: number) {
+        const ra = this.find(a);
+        const rb = this.find(b);
+        if (ra != rb) {
+            this.parent[rb] = ra;
+        }
     }
 }
 
 type ProbeState =
-    | { kind: "net"; name: string }
+    | {
+          kind: "nets";
+          /** Nets by key, see CrossProbeIndex.net_key() */
+          keys: string[];
+      }
     | { kind: "footprint"; footprint: Footprint }
     | null;
 
 /**
  * Keeps a schematic viewer and a board viewer in sync, like KiCad's
  * cross-probing: selecting a symbol selects its footprint and the other way
- * around, and selecting a net highlights it in both. Always active.
+ * around, and selecting a net (or nets of a bus) highlights it in both, on
+ * every sheet it's on. Always active.
  */
 export class CrossProbe implements IDisposable {
     static pages_event = "kicanvas:cross-probe-pages";
@@ -222,16 +550,13 @@ export class CrossProbe implements IDisposable {
      */
     probe_net(name: string) {
         this.#guard(() => {
-            this.#state = { kind: "net", name };
-            this.board_viewer.highlight_net(name);
-            const bbox = this.board_viewer.net_bbox(name);
-            if (bbox.valid) {
-                this.board_viewer.zoom_to_item(bbox);
-            }
-            this.#zoom_schematic = true;
-            this.#apply_to_schematic(false);
-            this.#announce_pages();
+            this.#set_nets([name], { board: true, schematic: true });
         });
+    }
+
+    /** The probed nets (keys), if nets are probed. */
+    get net_keys(): readonly string[] {
+        return this.#state?.kind == "nets" ? this.#state.keys : [];
     }
 
     constructor(
@@ -252,7 +577,11 @@ export class CrossProbe implements IDisposable {
         this.#disposables.add(
             sv.addEventListener(KiCanvasNetSelectEvent.type, (e) =>
                 this.#guard(() =>
-                    this.#on_schematic_net(e.detail.net as SheetNet | null),
+                    this.#on_schematic_nets(
+                        (e.detail.nets ??
+                            (e.detail.net ? [e.detail.net] : [])) as SheetNet[],
+                        e.detail.members,
+                    ),
                 ),
             ),
         );
@@ -263,13 +592,16 @@ export class CrossProbe implements IDisposable {
         );
         this.#disposables.add(
             bv.addEventListener(KiCanvasNetSelectEvent.type, (e) =>
-                this.#guard(() =>
-                    this.#set_state(
-                        e.detail.net
-                            ? { kind: "net", name: e.detail.net as string }
-                            : null,
-                    ),
-                ),
+                this.#guard(() => {
+                    const name = e.detail.net as string | null;
+                    if (name) {
+                        // Show it in the schematic, on another sheet if
+                        // needed.
+                        this.#set_nets([name], { schematic: true });
+                    } else {
+                        this.#clear();
+                    }
+                }),
             ),
         );
         // Apply the current probe to whichever sheet is shown next.
@@ -308,7 +640,20 @@ export class CrossProbe implements IDisposable {
         }
     }
 
+    #clear() {
+        this.#state = null;
+        this.board_viewer.highlight_net(null);
+        this.#apply_to_schematic(false);
+        this.#announce_pages();
+    }
+
     #on_schematic_select(item: unknown) {
+        // Selecting a sheet symbol (e.g. on the way into the sheet) keeps
+        // the probe.
+        if (item instanceof SchematicSheet) {
+            return;
+        }
+
         const page = this.schematic_page();
         const index = this.index;
         if (!page || !index) {
@@ -331,33 +676,69 @@ export class CrossProbe implements IDisposable {
         this.#announce_pages();
     }
 
-    #on_schematic_net(net: SheetNet | null) {
+    #on_schematic_nets(nets: SheetNet[], members?: string[]) {
         const page = this.schematic_page();
-        const name = page && net ? this.index?.board_net_for(page, net) : null;
-        if (name) {
-            this.#set_state({ kind: "net", name });
-        } else {
+        const index = this.index;
+        const keys = new Set<string>();
+        if (page && index) {
+            for (const net of nets) {
+                const key = index.net_key(page, net);
+                if (key) {
+                    keys.add(key);
+                }
+            }
+            for (const member of members ?? []) {
+                for (const key of index.member_keys(page, member)) {
+                    keys.add(key);
+                }
+            }
+        }
+
+        if (keys.size) {
+            // The schematic already shows the clicked nets; show them on
+            // the board.
+            this.#set_nets([...keys], { board: true });
+        } else if (nets.length || members?.length) {
+            // Nothing to show elsewhere; the schematic keeps its highlight.
             this.#state = null;
             this.board_viewer.highlight_net(null);
             this.#announce_pages();
+        } else {
+            this.#clear();
         }
     }
 
     #on_board_select(item: unknown) {
         if (item instanceof Footprint) {
-            this.#set_state({ kind: "footprint", footprint: item });
+            this.#state = { kind: "footprint", footprint: item };
+            this.#apply_to_schematic(false);
+            this.#announce_pages();
         } else {
-            this.#set_state(null);
+            this.#state = null;
+            this.#apply_to_schematic(false);
+            this.#announce_pages();
         }
     }
 
-    #set_state(state: ProbeState) {
-        this.#state = state;
+    /**
+     * Highlights nets in both views.
+     *
+     * @param zoom - which views to zoom to the nets; the schematic also
+     *     switches to a sheet with the nets if the shown one has none.
+     */
+    #set_nets(keys: string[], zoom: { board?: boolean; schematic?: boolean }) {
+        this.#state = { kind: "nets", keys };
 
-        if (state?.kind == "net") {
-            this.board_viewer.highlight_net(state.name);
+        const bv = this.board_viewer;
+        bv.highlight_nets(keys);
+        if (zoom.board) {
+            const bbox = bv.net_bbox(keys);
+            if (bbox.valid) {
+                bv.zoom_to_item(bbox);
+            }
         }
 
+        this.#zoom_schematic = !!zoom.schematic;
         this.#apply_to_schematic(false);
         this.#announce_pages();
     }
@@ -376,21 +757,26 @@ export class CrossProbe implements IDisposable {
             return;
         }
 
-        if (state?.kind == "net") {
-            const nets = index.sheet_nets_for(page, state.name);
+        if (state?.kind == "nets") {
+            const nets = state.keys.flatMap((k) =>
+                index.sheet_nets_for(page, k),
+            );
+            const buses = index.sheet_buses_for(page, new Set(state.keys));
             if (!nets.length && this.#zoom_schematic && !sheet_changed) {
-                // Show a sheet that has the net; applied again once loaded.
-                const other = index.pages_with_net(state.name)[0];
+                // Show a sheet that has the nets; applied again once loaded.
+                const other = state.keys
+                    .map((k) => index.pages_with_net(k)[0])
+                    .find((p) => p);
                 if (other) {
                     this.project.set_active_page(other);
                     return;
                 }
             }
-            sv.highlight_nets(nets);
+            sv.highlight_nets(nets, false, buses);
             if (this.#zoom_schematic && nets.length) {
                 sv.zoom_to_item(BBox.combine(nets.map((n) => n.bbox)));
-                this.#zoom_schematic = false;
             }
+            this.#zoom_schematic = false;
             return;
         }
 
@@ -418,14 +804,16 @@ export class CrossProbe implements IDisposable {
         }
     }
 
-    /** Tells the UI which sheets contain the probed net or part. */
+    /** Tells the UI which sheets contain the probed nets or part. */
     #announce_pages() {
         const index = this.index;
         const state = this.#state;
         let pages: ProjectPage[] = [];
 
-        if (index && state?.kind == "net") {
-            pages = index.pages_with_net(state.name);
+        if (index && state?.kind == "nets") {
+            pages = [
+                ...new Set(state.keys.flatMap((k) => index.pages_with_net(k))),
+            ];
         } else if (index && state?.kind == "footprint") {
             pages = index.symbols_for(state.footprint).map((p) => p.page);
         }

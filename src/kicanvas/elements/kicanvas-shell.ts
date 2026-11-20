@@ -16,6 +16,7 @@ import { Footprint, KicadPCB } from "../../kicad/board";
 import { SchematicSymbol } from "../../kicad/schematic";
 import {
     KiCanvasLoadEvent,
+    KiCanvasMouseMoveEvent,
     KiCanvasNetSelectEvent,
     KiCanvasSelectEvent,
 } from "../../viewers/base/events";
@@ -89,11 +90,11 @@ class KiCanvasShellElement extends KCUIElement {
     static hint_event = "kicanvas:hint";
 
     static default_hint =
-        "Scroll: zoom · Middle drag or Shift/Ctrl+scroll: pan · Click: select a part or net";
+        "Scroll: zoom · Middle drag or Shift/Ctrl+scroll: pan · Click: select a part, net or bus · Double click: open sheet";
 
     /** Updates the one line hint at the bottom of the page. */
     #update_hint() {
-        const elm = this.renderRoot.querySelector("main > .hint");
+        const elm = this.renderRoot.querySelector("main .status .hint");
         if (!elm) {
             return;
         }
@@ -103,32 +104,48 @@ class KiCanvasShellElement extends KCUIElement {
         if (!text) {
             const card = this.#part_info;
             const bv = this.#board_app?.viewer as BoardViewer | undefined;
-            const net =
-                bv?.highlighted_net != null
-                    ? bv.board.get_netname_by_number(bv.highlighted_net)
-                    : undefined;
+            const sv = this.#schematic_app?.viewer as
+                | SchematicViewer
+                | undefined;
+            const keys = this.#cross_probe?.net_keys ?? [];
+            const board_nets = bv?.highlighted_nets ?? [];
+            const named = keys.filter((k) => !k.startsWith("#"));
             if (card?.open && card.info) {
                 text = `${card.info.reference} selected · Click elsewhere or Esc to clear`;
-            } else if (net) {
-                text = `Net ${net} highlighted · Esc to clear`;
+            } else if (keys.length > 1 || board_nets.length > 1) {
+                text = `${Math.max(keys.length, board_nets.length)} nets highlighted on all sheets · Esc to clear`;
+            } else if (named.length == 1) {
+                text = `Net ${named[0]} highlighted on all sheets · Double click a sheet to follow it · Esc to clear`;
+            } else if (board_nets.length == 1) {
+                text = `Net ${bv!.board.get_netname_by_number(board_nets[0]!)} highlighted · Esc to clear`;
+            } else if (keys.length || sv?.highlighted_nets.length) {
+                text = "Net highlighted · Esc to clear";
             }
         }
 
         elm.textContent = text ?? KiCanvasShellElement.default_hint;
     }
 
-    /** Places the search box at the top of the divider, or in the middle. */
-    #position_search() {
+    /**
+     * Places the row with the search box and the views' buttons at the top
+     * of the divider, or in the middle if there's only one view.
+     */
+    #position_bar() {
         const main = this.renderRoot.querySelector("main");
         const left = this.renderRoot.querySelector<HTMLElement>("main > .left");
-        if (!main || !this.#search) {
+        const bar =
+            this.renderRoot.querySelector<HTMLElement>("main > .center-bar");
+        if (!main || !bar) {
             return;
         }
-        const x =
+        let x =
             this.has_schematic && this.has_board && left
                 ? left.offsetWidth + 3
                 : main.clientWidth / 2;
-        this.#search.style.left = `${x}px`;
+        // Keep it in the window.
+        const half = bar.offsetWidth / 2;
+        x = Math.max(half + 4, Math.min(x, main.clientWidth - half - 4));
+        bar.style.left = `${x}px`;
     }
 
     /** Shows a part or net picked in the search box in both views. */
@@ -254,12 +271,12 @@ class KiCanvasShellElement extends KCUIElement {
             this.#update_hint(),
         );
 
-        // The search box sits at the top end of the divider.
+        // The search box and buttons sit at the top end of the divider.
         const workspace = this.renderRoot.querySelector("main")!;
         workspace.addEventListener(KCUIDividerElement.resize_event, () =>
-            this.#position_search(),
+            this.#position_bar(),
         );
-        new ResizeObserver(() => this.#position_search()).observe(workspace);
+        new ResizeObserver(() => this.#position_bar()).observe(workspace);
         workspace.addEventListener(KCSearchBoxElement.pick_event, (e) =>
             this.#on_search_pick((e as CustomEvent<SearchItem>).detail),
         );
@@ -285,6 +302,18 @@ class KiCanvasShellElement extends KCUIElement {
             if (e.key == "/" && this.loaded && !typing) {
                 e.preventDefault();
                 this.#search.focus();
+                return;
+            }
+            // Like KiCad's "Leave Sheet".
+            if (
+                e.key == "Backspace" &&
+                e.altKey &&
+                this.loaded &&
+                this.has_schematic &&
+                !typing
+            ) {
+                e.preventDefault();
+                this.#schematic_app.leave_sheet();
                 return;
             }
             if (
@@ -460,7 +489,35 @@ class KiCanvasShellElement extends KCUIElement {
             first_board(this.project),
             index(),
         );
-        this.#position_search();
+
+        // The views' buttons go next to the search box: the schematic's on
+        // its left, the board's on its right.
+        const tools = (side: string) =>
+            this.renderRoot.querySelector(`main .center-bar .tools.${side}`)!;
+        tools("left").replaceChildren(
+            ...(has_schematics ? this.#schematic_app.toolbar_buttons : []),
+        );
+        tools("right").replaceChildren(
+            ...(has_boards
+                ? [...this.#board_app.toolbar_buttons].reverse()
+                : []),
+        );
+        tools("left").toggleAttribute("hidden", !has_schematics);
+        tools("right").toggleAttribute("hidden", !has_boards);
+        this.#position_bar();
+        window.requestAnimationFrame(() => this.#position_bar());
+
+        // The board's coordinates are shown in the status line.
+        const coords = this.renderRoot.querySelector("main .status .coords")!;
+        coords.textContent = "";
+        if (bv) {
+            this.#workspace_listeners.push(
+                bv.addEventListener(KiCanvasMouseMoveEvent.type, () => {
+                    const p = bv.mouse_position;
+                    coords.textContent = `X ${p.x.toFixed(2)}  Y ${p.y.toFixed(2)} mm`;
+                }),
+            );
+        }
 
         // Keep the hint line in sync with the selection, after the card and
         // cross-probing have reacted.
@@ -622,8 +679,16 @@ class KiCanvasShellElement extends KCUIElement {
                     <div class="pane left">${this.#schematic_app}</div>
                     <kc-ui-divider storage-key="workspace"></kc-ui-divider>
                     <div class="pane right">${this.#board_app}</div>
-                    ${this.#part_info} ${this.#search}
-                    <div class="hint" role="status"></div>
+                    ${this.#part_info}
+                    <div class="center-bar">
+                        <div class="tools left"></div>
+                        ${this.#search}
+                        <div class="tools right"></div>
+                    </div>
+                    <div class="status" role="status">
+                        <span class="hint"></span>
+                        <span class="coords"></span>
+                    </div>
                 </main>
             </kc-ui-app>
         `;

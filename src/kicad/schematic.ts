@@ -478,7 +478,12 @@ export class BusAlias {
         /* (bus_alias "abusalias" (members "member1" "member2")) */
         Object.assign(
             this,
-            parse_expr(expr, P.start("bus_alias"), P.list("members", T.string)),
+            parse_expr(
+                expr,
+                P.start("bus_alias"),
+                P.positional("name", T.string),
+                P.list("members", T.string),
+            ),
         );
     }
 }
