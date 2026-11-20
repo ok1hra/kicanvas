@@ -61,7 +61,7 @@ export function markdown_report(
 }
 
 /** CSV with ";" separators, which Excel uses in most European locales. */
-function csv(rows: (string | number)[][]) {
+export function csv(rows: (string | number)[][]) {
     const cell = (v: string | number) => {
         const s = String(v);
         return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -143,7 +143,12 @@ export function json_report(
 
 /** Lets the user save some text as a file. */
 export function download_text(name: string, text: string, type: string) {
-    const url = URL.createObjectURL(new Blob([text], { type }));
+    download_blob(name, new Blob([text], { type }));
+}
+
+/** Lets the user save a file. */
+export function download_blob(name: string, blob: Blob) {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = name;

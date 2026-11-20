@@ -246,9 +246,25 @@ export class BoardViewer extends DocumentViewer<
     }
 
     override paint() {
-        // Painting creates new layers.
+        // Painting creates new layers; keep which are shown (e.g. when the
+        // view is flipped) and whether zones are filled.
+        const old = this.layers as LayerSet | undefined;
+        const visible = old
+            ? new Map([...old.in_ui_order()].map((l) => [l.name, l.visible]))
+            : undefined;
+        const fills = old?.show_zone_fills;
         this.#dimmed = undefined;
         super.paint();
+        const layers = this.layers as LayerSet;
+        if (visible && layers) {
+            for (const layer of layers.in_ui_order()) {
+                const shown = visible.get(layer.name);
+                if (shown !== undefined) {
+                    layer.visible = shown;
+                }
+            }
+            layers.show_zone_fills = fills!;
+        }
     }
 
     private set_layers_opacity(layers: Generator<ViewLayer>, opacity: number) {
