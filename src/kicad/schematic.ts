@@ -60,6 +60,31 @@ export const DefaultValues = {
 
 export type SchematicDrawing = Polyline | Text | Circle | Bezier | Image;
 
+/**
+ * The instance data (reference, page, ...) for a sheet path. Instance paths
+ * start with the root sheet's UUID; schematics copied from another project
+ * can still have that project's root UUID there. KiCad matches them anyway,
+ * so if there's no exact match, the root's UUID is ignored.
+ */
+export function instance_for<T>(
+    instances: Map<string, T>,
+    path: string,
+): T | undefined {
+    const exact = instances.get(path);
+    if (exact !== undefined || !path) {
+        return exact;
+    }
+    const below_root = (p: string) =>
+        p.split("/").filter(Boolean).slice(1).join("/");
+    const rest = below_root(path);
+    for (const [p, instance] of instances) {
+        if (below_root(p) == rest) {
+            return instance;
+        }
+    }
+    return undefined;
+}
+
 export class KicadSch {
     project?: Project;
     version: number;
@@ -184,7 +209,7 @@ export class KicadSch {
             const instance_data =
                 root_symbol_instances?.get(symbol_path) ??
                 global_symbol_instances?.get(symbol_path) ??
-                s.instances.get(path) ??
+                instance_for(s.instances, path) ??
                 root_symbol_instances?.get(legacy(s.uuid));
 
             if (!instance_data) {
@@ -208,7 +233,7 @@ export class KicadSch {
             const instance_data =
                 root_sheet_instances?.get(sheet_path) ??
                 global_sheet_instances?.get(sheet_path) ??
-                s.instances.get(path) ??
+                instance_for(s.instances, path) ??
                 root_sheet_instances?.get(legacy(s.uuid));
 
             if (!instance_data) {

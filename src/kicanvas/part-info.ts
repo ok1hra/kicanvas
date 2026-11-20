@@ -5,7 +5,7 @@
 */
 
 import type { Footprint } from "../kicad/board";
-import type { SchematicSymbol } from "../kicad/schematic";
+import { instance_for, type SchematicSymbol } from "../kicad/schematic";
 import { reference_in } from "./cross-probe";
 import type { ProjectPage } from "./project";
 
@@ -95,7 +95,7 @@ export class PartInfo {
         footprint?: Footprint,
     ): PartInfo {
         const reference = reference_in(page, symbol);
-        const instance = symbol.instances.get(page.sheet_path);
+        const instance = instance_for(symbol.instances, page.sheet_path);
         const fields: PartField[] = [];
         const add = (name: string, value: string | undefined) => {
             if (value !== undefined) {

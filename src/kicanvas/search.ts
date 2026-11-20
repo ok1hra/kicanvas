@@ -6,7 +6,11 @@
 
 import type { KicadPCB } from "../kicad";
 import type { Footprint } from "../kicad/board";
-import type { KicadSch, SchematicSymbol } from "../kicad/schematic";
+import {
+    instance_for,
+    type KicadSch,
+    type SchematicSymbol,
+} from "../kicad/schematic";
 import { reference_in, type CrossProbeIndex } from "./cross-probe";
 import type { Project, ProjectPage } from "./project";
 
@@ -77,7 +81,7 @@ export function build_search_items(
                 kind: "part",
                 reference,
                 value:
-                    symbol.instances.get(page.sheet_path)?.value ??
+                    instance_for(symbol.instances, page.sheet_path)?.value ??
                     symbol.value ??
                     "",
                 id: field(symbol, "ID"),

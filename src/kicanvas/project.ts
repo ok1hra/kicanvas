@@ -12,6 +12,7 @@ import { Logger } from "../base/log";
 import { basename, dirname, normalize_join } from "../base/paths";
 import { is_string, type Constructor } from "../base/types";
 import { KicadPCB, KicadSch, ProjectSettings } from "../kicad";
+import { instance_for } from "../kicad/schematic";
 import type { SchematicSheet } from "../kicad/schematic";
 import type { IFileSystem } from "./services/vfs";
 
@@ -197,7 +198,7 @@ export class Project extends EventTarget implements IDisposable {
 
                     const sheet_path = `${path}/${sheet.uuid}`;
                     const instance =
-                        sheet.instances.get(path) ??
+                        instance_for(sheet.instances, path) ??
                         // KiCad 6 stored sheet instances in the root
                         // schematic, without the root's UUID.
                         root.sheet_instances?.get(
